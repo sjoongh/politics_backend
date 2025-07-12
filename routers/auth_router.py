@@ -8,6 +8,7 @@ router = APIRouter()
 @router.post("/register", response_model=ResponseModel, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate):
     """사용자 회원가입"""
+    print("회원가입 요청 데이터:", user_data)
     result = await auth_service.register_user(user_data)
     if result["success"]:
         return result

@@ -106,8 +106,8 @@ class AuthService:
                     "token_type": "bearer",
                     "user": {
                         "email": user_data.email,
-                        "name": user_data.name,
-                        "role": user_data.role
+                        "nickname": user_data.nickname,
+                        "role": "user"
                     }
                 }
             }
@@ -128,7 +128,7 @@ class AuthService:
                 return {"success": False, "message": "비밀번호가 올바르지 않습니다."}
 
             # 액세스 토큰 생성
-            access_token = self.create_access_token({"sub": user["uid"], "email": user["email"]})
+            access_token = self.create_access_token({"sub": user["email"]})
 
             return {
                 "success": True,
@@ -137,9 +137,8 @@ class AuthService:
                     "access_token": access_token,
                     "token_type": "bearer",
                     "user": {
-                        "uid": user["uid"],
                         "email": user["email"],
-                        "name": user["name"],
+                        "nickname": user["nick_name"],
                         "role": user["role"],
                         "interests": user.get("interests", []),
                         "notification_enabled": user.get("notification_enabled", True),
