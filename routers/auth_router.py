@@ -57,3 +57,11 @@ async def update_profile(
     if result["success"]:
         return result
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["message"])
+
+@router.delete("/delete", response_model=ResponseModel)
+async def delete_profile(email: str):
+    """사용자 프로필 업데이트"""
+    result = await auth_service.delete_user(email=email)
+    if result["success"]:
+        return result
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["message"])
