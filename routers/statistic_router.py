@@ -1,7 +1,7 @@
 # routers/statistics_router.py
 from fastapi import APIRouter, status, HTTPException
 from models.model import ResponseModel
-from services.statistics_service import StatisticsService
+from services.statistics_service import statistics_service
 
 router = APIRouter()
 
@@ -9,7 +9,7 @@ router = APIRouter()
 async def get_statistics():
     """서비스 통계 조회"""
     try:
-        stats = await StatisticsService.get_statistics_data()
+        stats = await statistics_service.get_statistics_data()
         return {
             "success": True,
             "data": stats

@@ -23,3 +23,5 @@ class PoliticsService:
     async def get_political_statements():
         docs = db.collection("statements").order_by("timestamp", direction="DESCENDING").limit(10).stream()
         return [doc.to_dict() for doc in docs]
+
+politics_service = PoliticsService()

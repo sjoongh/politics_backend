@@ -1,13 +1,13 @@
 from fastapi import APIRouter, status
 from models.model import ResponseModel
-from services.politics_service import PoliticsService
+from services.politics_service import politics_service
 
 router = APIRouter()
 
 @router.get("/president", response_model=ResponseModel)
 async def get_president():
     """대통령 정보 반환"""
-    data = await PoliticsService.get_president_info()
+    data = await politics_service.get_president_info()
     return {
         "success": True,
         "message": "대통령 정보 조회 성공",
@@ -17,7 +17,7 @@ async def get_president():
 @router.get("/policies", response_model=ResponseModel)
 async def get_policies():
     """최근 정책 반환"""
-    data = await PoliticsService.get_recent_policies()
+    data = await politics_service.get_recent_policies()
     return {
         "success": True,
         "message": "정책 정보 조회 성공",
@@ -27,7 +27,7 @@ async def get_policies():
 @router.get("/parliament", response_model=ResponseModel)
 async def get_parliament():
     """국회 활동 반환"""
-    data = await PoliticsService.get_parliamentary_activities()
+    data = await politics_service.get_parliamentary_activities()
     return {
         "success": True,
         "message": "국회 활동 조회 성공",
@@ -37,7 +37,7 @@ async def get_parliament():
 @router.get("/statements", response_model=ResponseModel)
 async def get_statements():
     """정치인 발언 반환"""
-    data = await PoliticsService.get_political_statements()
+    data = await politics_service.get_political_statements()
     return {
         "success": True,
         "message": "정치인 발언 조회 성공",

@@ -177,6 +177,7 @@ class NewsService:
             if category:
                 query = articles_ref.where("category", "==", category)
             else:
+                print("카테고리 필터 없음")
                 query = articles_ref
 
             # 정렬 및 페이징
@@ -188,6 +189,7 @@ class NewsService:
 
             return {
                 "success": True,
+                "message": "뉴스 목록 조회 성공",
                 "data": {"articles": articles, "count": len(articles)}
             }
 
@@ -222,6 +224,7 @@ class NewsService:
 
             return {
                 "success": True,
+                "message": "기사 검색 성공",
                 "data": {"articles": matched_articles, "query": query, "count": len(matched_articles)}
             }
 
