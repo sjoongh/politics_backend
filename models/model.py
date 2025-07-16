@@ -106,49 +106,37 @@ class SearchResult(BaseModel):
     total_count: int
     query: str
 
+# 대통령 정책
 class President(BaseModel):
-    name: str
-    party: str
-    start_date: str
-
-class Policy(BaseModel):
-    date: str
-    title: str
-    description: str
-    details: str
-
-class ParliamentaryActivity(BaseModel):
-    date: str
-    title: str
-    proposer: Optional[str] = None
-    status: str
-    committee: Optional[str] = None
-    description: Optional[str] = None
-
-class PoliticalStatement(BaseModel):
-    date: str
-    speaker: str
-    party: str
-    content: str
-    context: str
-    type: str
-
-class UserRegister(BaseModel):
-    id: str
-    pw: str
-
-class Summary(BaseModel):
     title: str
     summary: str
-    tags: List[str]
-    link: str
-    createdAt: str
+    context_detail: str
+    date: str
+    created_at: str
 
-class SummaryInput(BaseModel):
-    title: str
-    article: str
-    tags: List[str]
-    link: str
+# 국회 활동
+class ParliamentaryActivity(BaseModel):
+    title: str # 활동 제목
+    proposer: Optional[str] = None # 발의자
+    status: str # 법안 상태 (예: "발의", "가결", "심사 중" "통과")
+    category: str # 법안 카테고리 (예: "경제", "사회", "정치")
+    bill_number: Optional[str] = None # 법안 번호
+    committee: Optional[str] = None # 소관 위원회
+    description: Optional[str] = None # 법안 설명
+    context: Optional[str] = None # 법안 내용
+    date: str
+    created_at: str
+
+# 정치인 발언
+class PoliticalStatement(BaseModel):
+    politician_name: str # 정치인 이름
+    politician_party: str # 정치인 소속 정당
+    speak_reason : str # 발언 이유
+    context: str # 발언 내용
+    category: str # 발언 카테고리 (예: "정책", "논란", "선거", "연대")
+    source: str # 발언 출처 (예: "국회 회의록")
+    date: str
+    created_at: str
 
 # API 응답 모델
 class ResponseModel(BaseModel):
