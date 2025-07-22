@@ -15,20 +15,86 @@ class NewsService:
     def __init__(self):
         self.rss_feeds = {
             "정치": [
-                "https://rss.hankyung.com/politics.xml",
-                "https://www.sedaily.com/NewsList/Politics/All?type=rss",
-                "http://www.segye.com/Articles/RSSFeed/Politics.xml",
-                "http://www.hani.co.kr/rss/politics/",
+                "https://www.yna.co.kr/rss/politics.xml" # 연합뉴스 정치
+                "https://www.yonhapnewstv.co.kr/category/news/politics/feed/", # 연합뉴스TV 정치
+                "https://rss.hankyung.com/politics.xml", # 한국경제 정치
+                "http://www.segye.com/Articles/RSSFeed/Politics.xml", # 세계일보 정치
+                "http://www.hani.co.kr/rss/politics/", # 한겨레 정치
                 "https://rss.donga.com/politics.xml",  # 동아일보 정치
             ],
-            # "대통령": [
-            #     "https://www.president.go.kr/rss/news.xml",  # 대통령실 공식
-            # ],
-            # "국회": [
-            #     "https://www.assembly.go.kr/rss/news.xml",  # 국회 공식
-            # ]
+            "대통령": [
+                "https://www.korea.kr/rss/president.xml",  # 대통령실 공식
+            ],
+            "정책": [
+                "https://www.korea.kr/rss/policy.xml",  # 정책 뉴스
+            ],
+            "부처별": [
+                "https://www.korea.kr/rss/ebriefing.xml",  # 부처별 브리핑
+            ]
         }
         self.request_delay = 3  # RSS 요청 간 3초 지연
+
+    def _clean_source(self, raw_source: str, url: str = "") -> str:
+        """RSS의 feed.title 또는 출처 텍스트를 정제"""
+        # 우선 URL 도메인을 기준으로 정리
+        domain_map = {
+            "yna.co.kr": "연합뉴스",
+            "yonhapnewstv.co.kr": "연합뉴스",
+            "hankyung.com": "한국경제",
+            "segye.com": "세계일보",
+            "hani.co.kr": "한겨레",
+            "donga.com": "동아일보",
+            "sedaily.com": "서울경제",
+            "president": "대통령실",
+            "policy": "정책 뉴스",
+            "ebriefing": "부처별 브리핑"
+        }
+
+        for domain, name in domain_map.items():
+            if domain in url:
+                return name
+
+        # fallback: ":" 기준 앞부분 사용
+        return raw_source.split(":")[0].strip()
+    
+    def _extract_image_url(self, entry: dict) -> str:
+        # 1. media_content 필드 (일반적으로 신뢰도가 높음)
+        media_content = entry.get("media_content", [])
+        if media_content and isinstance(media_content, list):
+            url = media_content[0].get("url", "")
+            if url:
+                return url
+
+        # 2. enclosure 필드 (일부 RSS에서 사용)
+        if "enclosure" in entry and isinstance(entry["enclosure"], dict):
+            url = entry["enclosure"].get("url", "")
+            if url:
+                return url
+
+        # 3. entry.links에서 이미지 타입 찾기 (rel="enclosure" 또는 type이 image인 경우)
+        if "links" in entry:
+            for link in entry["links"]:
+                if (link.get("rel") == "enclosure" or "image" in link.get("type", "")):
+                    url = link.get("href", "")
+                    if url:
+                        return url
+
+        # 4. content:encoded 내 <img src="...">
+        content = entry.get("content", [{}])
+        if content and isinstance(content, list):
+            raw_html = content[0].get("value", "")
+            match = re.search(r'<img[^>]+src=["\'](.*?)["\']', raw_html)
+            if match:
+                return match.group(1)
+
+        # 5. summary 내 <img src="...">
+        summary = entry.get("summary", "")
+        if summary:
+            match = re.search(r'<img[^>]+src=["\'](.*?)["\']', summary)
+            if match:
+                return match.group(1)
+
+        return ""  # 못 찾은 경우 빈 문자열
 
     def _generate_article_id(self, title: str, source_url: str) -> str:
         """기사 고유 ID 생성"""
@@ -101,7 +167,9 @@ class NewsService:
                             title = self._clean_text(entry.get('title', ''))
                             summary = self._clean_text(entry.get('summary', ''))[:300]  # 300자로 제한
                             source_url = entry.get('link', '')
-                            source = feed.feed.get('title', 'Unknown')
+                            source_raw = feed.feed.get('title', 'Unknown')
+                            source = self._clean_source(source_raw, source_url)
+                            image_url = self._extract_image_url(entry)
 
                             # 필수 정보가 있는 경우만 처리
                             if title and source_url:
@@ -120,6 +188,7 @@ class NewsService:
                                         "ai_summary": ai_summary,
                                         "source": source,
                                         "source_url": source_url,
+                                        "image_url": image_url,
                                         "category": self._categorize_article(title, summary).value,
                                         "keywords": self._extract_keywords(title, summary),
                                         "published_at": published_at,

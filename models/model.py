@@ -37,7 +37,7 @@ class Token(BaseModel):
 # 뉴스 기사 관련 모델
 class ArticleBase(BaseModel):
     title: str
-    summary: str
+    ai_summary: str
     source: str
     source_url: str
     category: ArticleCategory

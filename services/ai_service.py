@@ -35,8 +35,14 @@ class AISummaryService:
             print("Loaded API Key:", os.getenv("GOOGLE_API_KEY"))
             genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
             prompt = f"""
-                당신은 한국 정치 뉴스 전문 요약 AI입니다. 주어진 뉴스 기사를 2-3문장으로 핵심만 간결하게 요약해주세요. 객관적이고 중립적인 톤을 유지하세요.
-                \n\n다음 정치 뉴스를 요약해주세요:\n\n{text_to_summarize}
+                다음 뉴스 기사를 한국의 정치 뉴스 전문가의 시각으로 요약하세요.
+
+                - 본문 요약만 출력하십시오.
+                - "네", "다음은" 같은 접두어나 설명은 생략하세요.
+                - 요약은 2~3문장으로 구성하세요.
+                - 형식: 요약문만 출력하세요 (예: "이재명 대통령은 오늘…”) 어떤 설명이나 인삿말, 서론 없이 요약 내용만 출력하세요.
+                
+                \n\n{text_to_summarize}
 
                 위 내용을 2~3문장으로 객관적이고 중립적으로 요약해 주세요.
                 """
