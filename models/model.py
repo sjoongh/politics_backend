@@ -109,33 +109,41 @@ class SearchResult(BaseModel):
 # 대통령 정책
 class President(BaseModel):
     title: str
-    summary: str
-    context_detail: str
-    date: str
+    context: str
+    promise_type: str # 약속 유형 (예: "공약", "정책")
+    status: str # 약속 상태 (예: "이행 중", "완료", "미이행")
+    category: str # 약속 카테고리 (예: "경제", "사회", "정치")
+    progress: Optional[str] = None # 진행 상황 (예: "50% 완료")
+    last_update: Optional[str] = None # 마지막 업데이트 날짜
+    related_links: Optional[List[str]] = None # 관련 링크
+    date: str # 약속 날짜
     created_at: str
 
-# 국회 활동
+# 정책
 class ParliamentaryActivity(BaseModel):
     title: str # 활동 제목
-    proposer: Optional[str] = None # 발의자
+    context: str # 활동 내용
+    type: str # 활동 유형 (예: "회의", "토론", "법안 심사")
+    date: str # 활동 날짜
     status: str # 법안 상태 (예: "발의", "가결", "심사 중" "통과")
+    proposer: Optional[str] = None # 발의자
     category: str # 법안 카테고리 (예: "경제", "사회", "정치")
-    bill_number: Optional[str] = None # 법안 번호
     committee: Optional[str] = None # 소관 위원회
+    bill_number: Optional[str] = None # 법안 번호
     description: Optional[str] = None # 법안 설명
-    context: Optional[str] = None # 법안 내용
-    date: str
+    related_links: Optional[List[str]] = None # 관련 링크
     created_at: str
 
 # 정치인 발언
 class PoliticalStatement(BaseModel):
-    politician_name: str # 정치인 이름
-    politician_party: str # 정치인 소속 정당
+    speaker: str # 정치인 이름
+    party: str # 정당명
     speak_reason : str # 발언 이유
     context: str # 발언 내용
     category: str # 발언 카테고리 (예: "정책", "논란", "선거", "연대")
-    source: str # 발언 출처 (예: "국회 회의록")
-    date: str
+    type: str # 발언 성격 (예 : 비판, 공약, 해명, 정책제안, 논란 등)
+    related_links: Optional[List[str]] = None # 관련 링크
+    date: str # 발언 날짜
     created_at: str
 
 # API 응답 모델

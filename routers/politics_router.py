@@ -24,15 +24,15 @@ async def get_policies():
         "data": {"policies": data}
     }
 
-@router.get("/parliament", response_model=ResponseModel)
-async def get_parliament():
-    """국회 활동 반환"""
-    data = await politics_service.get_parliamentary_activities()
-    return {
-        "success": True,
-        "message": "국회 활동 조회 성공",
-        "data": {"activities": data}
-    }
+# @router.get("/parliament", response_model=ResponseModel)
+# async def get_parliament():
+#     """국회 활동 반환"""
+#     data = await politics_service.get_parliamentary_activities()
+#     return {
+#         "success": True,
+#         "message": "국회 활동 조회 성공",
+#         "data": {"activities": data}
+#     }
 
 @router.get("/statements", response_model=ResponseModel)
 async def get_statements():

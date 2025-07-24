@@ -10,6 +10,7 @@ import re
 from services.ai_service import ai_summary_service
 import asyncio
 import requests
+from models.model import President, ParliamentaryActivity, PoliticalStatement
 
 class NewsService:
     def __init__(self):
@@ -28,8 +29,8 @@ class NewsService:
             "정책": [
                 "https://www.korea.kr/rss/policy.xml",  # 정책 뉴스
             ],
-            "부처별": [
-                "https://www.korea.kr/rss/ebriefing.xml",  # 부처별 브리핑
+            "정부": [
+                "https://www.korea.kr/rss/ebriefing.xml",  # 정부 브리핑
             ]
         }
         self.request_delay = 3  # RSS 요청 간 3초 지연
@@ -145,81 +146,154 @@ class NewsService:
         return list(set(keywords))  # 중복 제거
 
     async def collect_news_from_rss(self, category: str = None) -> Dict[str, Any]:
-        """RSS 피드에서 뉴스 수집"""
         try:
             collected_articles = []
+            collected_presidents = []
+            collected_parliamentary = []
+            collected_statements = []
+
             feeds_to_process = self.rss_feeds.items() if not category else [(category, self.rss_feeds.get(category, []))]
 
             for category_name, feed_urls in feeds_to_process:
                 for feed_url in feed_urls:
                     try:
-                        # RSS 피드 파싱
                         response = requests.get(feed_url)
-                        response.encoding = 'utf-8'  # 강제 인코딩
+                        response.encoding = 'utf-8'
                         feed = feedparser.parse(response.text)
                         if feed.bozo:
                             print(f"Error parsing feed {feed_url}: {feed.bozo_exception}")
                             continue
 
-                        for entry in feed.entries[:10]:  # 최신 10개 기사만 수집
-                            print(entry)  # 디버깅용 출력
-                            # 기사 정보 추출
+                        for entry in feed.entries[:10]:
                             title = self._clean_text(entry.get('title', ''))
-                            summary = self._clean_text(entry.get('summary', ''))[:300]  # 300자로 제한
+                            summary = self._clean_text(entry.get('summary', ''))[:300]
                             source_url = entry.get('link', '')
                             source_raw = feed.feed.get('title', 'Unknown')
                             source = self._clean_source(source_raw, source_url)
                             image_url = self._extract_image_url(entry)
 
-                            # 필수 정보가 있는 경우만 처리
-                            if title and source_url:
-                                article_id = self._generate_article_id(title, source_url)
+                            if not (title and source_url):
+                                continue
 
-                                # 중복 확인
-                                if not await self._is_article_exists(article_id):
-                                    ai_result = await ai_summary_service.summarize_article(title, summary)
-                                    await asyncio.sleep(15)  # AI 요청 간 지연
-                                    ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
-                                    published = entry.get('published_parsed')
-                                    published_at = (datetime(*published[:6]) if isinstance(published, tuple) else datetime.now())
-                                    article_data = {
-                                        "id": article_id,
-                                        "title": title,
-                                        "ai_summary": ai_summary,
-                                        "source": source,
-                                        "source_url": source_url,
-                                        "image_url": image_url,
-                                        "category": self._categorize_article(title, summary).value,
-                                        "keywords": self._extract_keywords(title, summary),
-                                        "published_at": published_at,
-                                        "created_at": datetime.utcnow(),
-                                        "updated_at": datetime.utcnow(),
-                                        "view_count": 0,
-                                        "bookmark_count": 0
-                                    }
+                            article_id = self._generate_article_id(title, source_url)
 
-                                    collected_articles.append(article_data)
+                            # 중복 확인
+                            if await self._is_article_exists(article_id):
+                                continue
 
-                        # 요청 간 지연
+                            ai_result = await ai_summary_service.summarize_article(title, summary)
+                            await asyncio.sleep(15)
+                            ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
+                            published = entry.get('published_parsed')
+                            published_at = (datetime(*published[:6]) if isinstance(published, tuple) else datetime.now())
+
+                            # AI 정치인 발언 추출 (예시: ai_result에 정치인 발언 정보가 있을 경우)
+                            if ai_result.get("data", {}).get("statement"):
+                                statement = ai_result["data"]["statement"]
+                                statement_id = self._generate_article_id(statement["spaker"], statement["context"])
+                                statement_data = PoliticalStatement(
+                                    spaker=statement["spaker"],
+                                    party=statement["party"],
+                                    speak_reason=statement.get("speak_reason", ""),
+                                    context=statement["context"],
+                                    category=statement.get("category", ""),
+                                    type=statement.get("type", ""),
+                                    related_links=statement.get("related_links", []),
+                                    date=statement.get("date", published_at.strftime("%Y-%m-%d")),
+                                    created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                ).dict()
+                                db.collection("statements").document(statement_id).set(statement_data)
+                                collected_statements.append(statement_data)
+                                continue  # 정치인 발언은 기사 저장에서 제외
+
+                            # 정책
+                            if category_name == "정책":
+                                policy_data = ParliamentaryActivity(
+                                    title=title,
+                                    context=ai_summary,
+                                    type="",
+                                    date=published_at.strftime("%Y-%m-%d"),
+                                    status="",
+                                    proposer=None,
+                                    category="",
+                                    committee=None,
+                                    bill_number=None,
+                                    description=summary,
+                                    related_links=[source_url],
+                                    created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                ).dict()
+                                db.collection("parliamentary_activities").document(article_id).set(policy_data)
+                                collected_parliamentary.append(policy_data)
+                            elif category_name == "대통령":
+                                president_data = President(
+                                    id = article_id,
+                                    title=title,
+                                    context=ai_summary,
+                                    promise_type="",
+                                    status="",
+                                    category="",
+                                    progress=None,
+                                    last_update=published_at.strftime("%Y-%m-%d"),
+                                    related_links=[source_url],
+                                    date=published_at.strftime("%Y-%m-%d"),
+                                    created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                ).dict()
+                                db.collection("presidents").document(article_id).set(president_data)
+                                collected_presidents.append(president_data)
+                            elif category_name == "정부":
+                                # 정부 브리핑은 뉴스 엔티티에 저장
+                                article_data = {
+                                    "id": article_id,
+                                    "title": title,
+                                    "ai_summary": ai_summary,
+                                    "source": source,
+                                    "source_url": source_url,
+                                    "image_url": image_url,
+                                    "category": "정부",
+                                    "keywords": self._extract_keywords(title, summary),
+                                    "published_at": published_at,
+                                    "created_at": datetime.utcnow(),
+                                    "updated_at": datetime.utcnow(),
+                                    "view_count": 0,
+                                    "bookmark_count": 0
+                                }
+                                db.collection("articles").document(article_id).set(article_data)
+                                collected_articles.append(article_data)
+                            else:
+                                # 기본 정치 뉴스는 뉴스 엔티티에 저장
+                                article_data = {
+                                    "id": article_id,
+                                    "title": title,
+                                    "ai_summary": ai_summary,
+                                    "source": source,
+                                    "source_url": source_url,
+                                    "image_url": image_url,
+                                    "category": category_name,
+                                    "keywords": self._extract_keywords(title, summary),
+                                    "published_at": published_at,
+                                    "created_at": datetime.utcnow(),
+                                    "updated_at": datetime.utcnow(),
+                                    "view_count": 0,
+                                    "bookmark_count": 0
+                                }
+                                db.collection("articles").document(article_id).set(article_data)
+                                collected_articles.append(article_data)
+
                         time.sleep(self.request_delay)
 
                     except Exception as e:
                         print(f"RSS 피드 처리 오류 ({feed_url}): {e}")
                         continue
 
-            # Firestore에 저장
-            saved_count = 0
-            for article in collected_articles:
-                try:
-                    db.collection("articles").document(article["id"]).set(article)
-                    saved_count += 1
-                except Exception as e:
-                    print(f"기사 저장 오류: {e}")
-
             return {
                 "success": True,
-                "message": f"{saved_count}개의 새 기사가 수집되었습니다.",
-                "data": {"collected_count": saved_count, "articles": collected_articles[:5]}  # 최근 5개만 반환
+                "message": "수집 완료",
+                "data": {
+                    "articles": collected_articles[:5],
+                    "presidents": collected_presidents[:5],
+                    "parliamentary_activities": collected_parliamentary[:5],
+                    "statements": collected_statements[:5]
+                }
             }
 
         except Exception as e:
