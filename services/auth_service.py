@@ -142,7 +142,8 @@ class AuthService:
                         "role": user["role"],
                         "interests": user.get("interests", []),
                         "notification_enabled": user.get("notification_enabled", True),
-                        "avatar_url": user.get("avatar_url")
+                        "avatar_url": user.get("avatar_url"),
+                        "created_at": user.get("created_at", datetime.utcnow()).isoformat(),
                     }
                 }
             }

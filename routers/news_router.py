@@ -19,14 +19,6 @@ async def get_news(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
     return result
 
-@router.get("/{article_id}", response_model=ResponseModel)
-async def get_news_detail(article_id: str):
-    """뉴스 상세 조회"""
-    result = await news_service.get_article_by_id(article_id)
-    if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["message"])
-    return result
-
 @router.get("/search", response_model=ResponseModel)
 async def search_news(
     q: str,
@@ -51,3 +43,11 @@ async def collect_news():
     #    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
     #return result
     return await news_service.collect_news_from_rss()
+
+@router.get("/{article_id}", response_model=ResponseModel)
+async def get_news_detail(article_id: str):
+    """뉴스 상세 조회"""
+    result = await news_service.get_article_by_id(article_id)
+    if not result["success"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["message"])
+    return result
