@@ -39,23 +39,16 @@ class NewsService:
         """RSS의 feed.title 또는 출처 텍스트를 정제"""
         # 우선 URL 도메인을 기준으로 정리
         domain_map = {
-            "yna.co.kr": "연합뉴스",
-            "yonhapnewstv.co.kr": "연합뉴스",
-            "hankyung.com": "한국경제",
-            "segye.com": "세계일보",
-            "hani.co.kr": "한겨레",
-            "donga.com": "동아일보",
+            "yna.co.kr": "연합뉴스", "yonhapnewstv.co.kr": "연합뉴스",
+            "hankyung.com": "한국경제", "segye.com": "세계일보",
+            "hani.co.kr": "한겨레", "donga.com": "동아일보",
             "sedaily.com": "서울경제",
-            "president": "대통령실",
-            "policy": "정책 뉴스",
-            "ebriefing": "부처별 브리핑"
+            "president": "대통령실", "policy": "정책 뉴스", "ebriefing": "부처별 브리핑"
         }
 
         for domain, name in domain_map.items():
             if domain in url:
                 return name
-
-        # fallback: ":" 기준 앞부분 사용
         return raw_source.split(":")[0].strip()
     
     def _extract_image_url(self, entry: dict) -> str:
@@ -181,63 +174,49 @@ class NewsService:
                             if await self._is_article_exists(article_id):
                                 continue
 
-                            ai_result = await ai_summary_service.summarize_article(title, summary)
+                            ai_result = await ai_summary_service.summarize_by_category(title, summary)
                             await asyncio.sleep(15)
-                            ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
+                            if not ai_result["success"]:
+                                print(f"AI 요약 실패: {ai_result['message']}")
+                                continue
+                            # ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
                             published = entry.get('published_parsed')
                             published_at = (datetime(*published[:6]) if isinstance(published, tuple) else datetime.now())
-
-                            # AI 정치인 발언 추출 (예시: ai_result에 정치인 발언 정보가 있을 경우)
-                            if ai_result.get("data", {}).get("statement"):
-                                statement = ai_result["data"]["statement"]
-                                statement_id = self._generate_article_id(statement["spaker"], statement["context"])
-                                statement_data = PoliticalStatement(
-                                    spaker=statement["spaker"],
-                                    party=statement["party"],
-                                    speak_reason=statement.get("speak_reason", ""),
-                                    context=statement["context"],
-                                    category=statement.get("category", ""),
-                                    type=statement.get("type", ""),
-                                    related_links=statement.get("related_links", []),
-                                    date=statement.get("date", published_at.strftime("%Y-%m-%d")),
-                                    created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                                ).dict()
-                                db.collection("statements").document(statement_id).set(statement_data)
-                                collected_statements.append(statement_data)
-                                continue  # 정치인 발언은 기사 저장에서 제외
+                            ai_data = ai_result["data"]
 
                             # 정책
                             if category_name == "정책":
                                 policy_data = ParliamentaryActivity(
                                     title=title,
-                                    context=ai_summary,
-                                    type="",
+                                    context= ai_data.get("context", ""),
+                                    type= ai_data.get("type", ""),
                                     date=published_at.strftime("%Y-%m-%d"),
-                                    status="",
-                                    proposer=None,
-                                    category="",
-                                    committee=None,
-                                    bill_number=None,
+                                    status= ai_data.get("status", ""),
+                                    proposer=ai_data.get("proposer", None),
+                                    category=ai_data.get("category", ""),
+                                    committee=ai_data.get("committee", None),
+                                    bill_number= ai_data.get("bill_number", None),
                                     description=summary,
                                     related_links=[source_url],
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                                ).dict()
+                                ). dict()
                                 db.collection("parliamentary_activities").document(article_id).set(policy_data)
                                 collected_parliamentary.append(policy_data)
                             elif category_name == "대통령":
                                 president_data = President(
                                     id = article_id,
                                     title=title,
-                                    context=ai_summary,
-                                    promise_type="",
-                                    status="",
-                                    category="",
-                                    progress=None,
+                                    context= ai_data.get("context", ""),
+                                    promise_type= ai_data.get("promise_type", ""),
+                                    status= ai_data.get("status", ""),
+                                    category= ai_data.get("category", ""),
+                                    progress= ai_data.get("progress", None),
                                     last_update=published_at.strftime("%Y-%m-%d"),
                                     related_links=[source_url],
                                     date=published_at.strftime("%Y-%m-%d"),
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                                 ).dict()
+
                                 db.collection("presidents").document(article_id).set(president_data)
                                 collected_presidents.append(president_data)
                             elif category_name == "정부":
@@ -245,11 +224,11 @@ class NewsService:
                                 article_data = {
                                     "id": article_id,
                                     "title": title,
-                                    "ai_summary": ai_summary,
+                                    "ai_summary": ai_data.get("ai_summary", ""),
                                     "source": source,
                                     "source_url": source_url,
                                     "image_url": image_url,
-                                    "category": "정부",
+                                    "category": ArticleCategory.GOVERNMENT.value,
                                     "keywords": self._extract_keywords(title, summary),
                                     "published_at": published_at,
                                     "created_at": datetime.utcnow(),
@@ -259,12 +238,12 @@ class NewsService:
                                 }
                                 db.collection("articles").document(article_id).set(article_data)
                                 collected_articles.append(article_data)
-                            else:
+                            elif category_name == "정치":
                                 # 기본 정치 뉴스는 뉴스 엔티티에 저장
                                 article_data = {
                                     "id": article_id,
                                     "title": title,
-                                    "ai_summary": ai_summary,
+                                    "ai_summary": ai_data.get("ai_summary", ""),
                                     "source": source,
                                     "source_url": source_url,
                                     "image_url": image_url,
@@ -278,6 +257,23 @@ class NewsService:
                                 }
                                 db.collection("articles").document(article_id).set(article_data)
                                 collected_articles.append(article_data)
+                            # AI 정치인 발언 추출 (예시: ai_result에 정치인 발언 정보가 있을 경우)
+                            else:
+                                statement_id = self._generate_article_id(ai_data.get("spaker", ""), ai_data.get("context", ""))
+                                statement_data = PoliticalStatement(
+                                    spaker=ai_data.get("speaker", ""),
+                                    party=ai_data.get("party", ""),
+                                    speak_reason= ai_data.get("speak_reason", ""),
+                                    context=ai_data.get("context", ""),
+                                    category= ai_data.get("category", ""),
+                                    type= ai_data.get("type", ""),
+                                    related_links=source_url,
+                                    date=published_at.strftime("%Y-%m-%d"),
+                                    created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                ).dict()
+                                db.collection("statements").document(statement_id).set(statement_data)
+                                collected_statements.append(statement_data)
+                                continue  # 정치인 발언은 기사 저장에서 제외
 
                         time.sleep(self.request_delay)
 
@@ -298,6 +294,16 @@ class NewsService:
 
         except Exception as e:
             return {"success": False, "message": f"뉴스 수집 중 오류가 발생했습니다: {str(e)}"}
+    
+    def _get_collection_name(self, category_name: str) -> str:
+        if category_name == "대통령":
+            return "presidents"
+        elif category_name == "정책":
+            return "parliamentary_activities"
+        elif category_name in ["정치인발언"]:
+            return "statements"
+        else:
+            return "articles"
 
     async def _is_article_exists(self, article_id: str) -> bool:
         """기사 중복 확인"""

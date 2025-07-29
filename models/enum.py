@@ -14,3 +14,4 @@ class ArticleCategory(str, Enum):
     PARLIAMENT = "parliament"
     POLITICS = "politics"
     BREAKING = "breaking"
+    GOVERNMENT = "government"

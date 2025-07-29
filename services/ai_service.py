@@ -7,169 +7,134 @@ from firebase.firebase_config import db
 import traceback
 
 class AISummaryService:
-    # def __init__(self):
+    def __init__(self):
     #     self.client = OpenAI(
     #         api_key=os.getenv("OPENAI_API_KEY")
     #     )
     #     print(self.client)
     #     self.model = "gpt-3.5-turbo"
     #     self.max_tokens = 100
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.model = genai.GenerativeModel('gemini-2.5-pro')
     
-    async def safe_summarize(title, summary, max_retries=3):
+    async def summarize_by_category(title, summary, max_retries=3):
         for attempt in range(max_retries):
             try:
-                return await ai_summary_service.summarize_article(title, summary)
+                return await ai_summary_service.summarize_by_category2(title, summary)
             except Exception as e:
                 wait = 10 * (attempt + 1)
                 print(f"429 에러 발생, {wait}초 후 재시도...")
                 await asyncio.sleep(wait)
         return {"success": False, "message": "요약 실패"}
 
-    async def summarize_article(self, title: str, content: str = "") -> Dict[str, Any]:
-        """개별 기사 요약"""
+    # ===== 프롬프트 빌더 =====
+    def _build_president_prompt(self, title: str, content: str) -> str:
+        return f"""
+        당신은 한국 정치 전문 기자이자 데이터 분석가입니다.
+        아래 대통령 관련 뉴스를 읽고, 다음 JSON 형식으로 반환하세요.
+        단 # 이 적혀있는 컬럼들은 해당 내용들을 반드시 준수하고 정보를 찾기 힘들경우 None로 반환하세요.
+
+        {{
+            "context": "..." # 요약 내용,
+            "promise_type": "..." # 약속 유형 (예: "공약", "정책"), 
+            "status": "..." # 약속 상태 (예: "이행 중", "완료", "미이행"), 
+            "category": "..." # 약속 카테고리 (예: "경제", "사회", "정치"), 
+            "progress": "..." # 진행 상황 (예: "50% 완료"),
+        }}
+
+        반드시 JSON만 반환하세요.
+        
+        제목: {title}
+        내용: {content}
+        """
+
+    def _build_policy_prompt(self, title: str, content: str) -> str:
+        return f"""
+        당신은 국회 전문 기자이자 데이터 분석가입니다.
+        아래 정책 뉴스를 읽고, 다음 JSON 형식으로 반환하세요.
+        단 # 이 적혀있는 컬럼들은 해당 내용들을 반드시 준수하고 정보를 찾기 힘들경우 None로 반환하세요.
+
+        {{
+            "context": "..." # 요약 내용,
+            "type": "..." # 활동 유형 (예: "회의", "토론", "법안 심사"),
+            "status": "..." # 법안 상태 (예: "발의", "가결", "심사 중" "통과"),
+            "proposer": "..." # 발의자 또는 발의자 그룹,
+            "category": "..." # 법안 카테고리 (예: "경제", "사회", "정치"),
+            "committee": "..." # 소관 위원회,
+            "bill_number": "..." # 법안 번호,
+            "description": "..." # 법안 설명
+        }}
+
+        반드시 JSON만 반환하세요.
+        
+        제목: {title}
+        내용: {content}
+        """
+
+    def _build_statement_prompt(self, title: str, content: str) -> str:
+        return f"""
+        당신은 정치인의 발언을 분석하는 데이터 전문가입니다.
+        아래 뉴스를 읽고, 다음 JSON 형식으로 반환하세요.
+        단 # 이 적혀있는 컬럼들은 해당 내용들을 반드시 준수하고 정보를 찾기 힘들경우 None로 반환하세요.
+
+        {{
+            "speaker": "..." # 정치인 이름,
+            "party": "..." # 정당명,
+            "speak_reason": "..." # 발언 이유,
+            "context": "..." # 요약 내용,
+            "category": "..." # 발언 카테고리 (예: "정책", "논란", "선거", "연대"),
+            "type": "..." # 발언 성격 (예 : 비판, 공약, 해명, 정책제안, 논란 등)
+        }}
+
+        반드시 JSON만 반환하세요.
+
+        제목: {title}
+        내용: {content}
+        """
+
+    def _build_general_politics_prompt(self, title: str, content: str) -> str:
+        return f"""
+        당신은 정치 전문 기자입니다.
+        아래 정치 뉴스를 2~3문장으로 요약하고, 다음 JSON 형식으로 반환하세요.
+        단 # 이 적혀있는 컬럼들은 해당 내용들을 반드시 준수하고 정보를 찾기 힘들경우 None로 반환하세요.
+
+        {{
+            "ai_summary": "..." # 요약 내용,
+        }}
+
+        반드시 JSON만 반환하세요.
+
+        제목: {title}
+        내용: {content}
+        """
+
+    # ===== AI 호출 메소드 =====
+    async def summarize_by_category2(self, category: str, title: str, content: str):
         try:
-            # 요약할 텍스트 준비
-            text_to_summarize = f"제목: {title}\n내용: {content}" if content else f"제목: {title}"
-            print("ai 요약할 내용"+text_to_summarize)
-            # OpenAI API 호출
-            print("Loaded API Key:", os.getenv("GOOGLE_API_KEY"))
-            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            prompt = f"""
-                다음 뉴스 기사를 한국의 정치 뉴스 전문가의 시각으로 요약하세요.
-
-                - 본문 요약만 출력하십시오.
-                - "네", "다음은" 같은 접두어나 설명은 생략하세요.
-                - 요약은 2~3문장으로 구성하세요.
-                - 형식: 요약문만 출력하세요 (예: "이재명 대통령은 오늘…”) 어떤 설명이나 인삿말, 서론 없이 요약 내용만 출력하세요.
-                - 예외사항으로 뉴스 기사에서 정치인의 발언이 있다면 아래 형식으로 JSON으로 추출하세요.
-                    - 정치인 발언이 없으면 "statement" 필드는 포함하지 마세요.
-                    - 정치인 발언이 있으면 아래 예시처럼 "statement" 필드를 포함하세요.
-                    예시:
-                        {
-                            "summary": "이재명 대통령은 오늘 ...",
-                            "statement": {
-                                "spaker": "이재명",
-                                "party": "더불어민주당",
-                                "speak_reason": "취임 축하",
-                                "context": "타밈 카타르 국왕과 첫 통화",
-                                "category": "정책",
-                                "type": "축하",
-                                "related_links": ["기사 원문 URL"],
-                                "date": "2025-07-22"
-                            }
-                        }
-                
-                \n\n{text_to_summarize}
-
-                위 내용을 2~3문장으로 객관적이고 중립적으로 요약해 주세요.
-                """
-            
-            model = genai.GenerativeModel('gemini-2.5-pro')
-            response = model.generate_content(prompt)
-            print("ai 요약결과:", response.text) 
-            
-            summary = response.text.strip()
-
-            return {
-                "success": True,
-                "data": {"summary": summary}
+            prompt_map = {
+                "대통령": self._build_president_prompt,
+                "정책": self._build_policy_prompt,
+                "정치인발언": self._build_statement_prompt,
+                "정치": self._build_general_politics_prompt,
+                "정부": self._build_general_politics_prompt
             }
+            prompt_builder = prompt_map.get(category, self._build_general_politics_prompt)
+            prompt = prompt_builder(title, content)
+
+            response = self.model.generate_content(prompt)
+            raw_text = response.text.strip()
+
+            # JSON 파싱
+            try:
+                parsed_data = json.loads(raw_text)
+            except json.JSONDecodeError:
+                return {"success": False, "message": "AI 응답이 JSON 형식이 아님", "raw": raw_text}
+
+            return {"success": True, "data": parsed_data}
 
         except Exception as e:
             traceback.print_exc()
-            return {
-                "success": False,
-                "message": f"AI 요약 생성 중 오류가 발생했습니다: {str(e)}"
-            }
-
-    async def generate_daily_summary(self, date: str = None) -> Dict[str, Any]:
-        """일일 정치 뉴스 요약 생성"""
-        try:
-            if not date:
-                date = datetime.now().strftime("%Y-%m-%d")
-
-            # 해당 날짜의 기사들 조회
-            articles = await self._get_articles_by_date(date)
-
-            if not articles:
-                return {
-                    "success": False,
-                    "message": "해당 날짜의 기사가 없습니다."
-                }
-
-            # 카테고리별로 기사 분류
-            categorized_articles = self._categorize_articles(articles)
-
-            # AI를 통한 종합 요약 생성
-            comprehensive_summary = await self._generate_comprehensive_summary(categorized_articles)
-
-            # 주요 하이라이트 추출
-            highlights = await self._extract_highlights(articles)
-
-            # 일일 요약 데이터 구성
-            daily_summary = {
-                "id": f"summary_{date}",
-                "date": date,
-                "highlights": highlights,
-                "comprehensive_summary": comprehensive_summary,
-                "categories": categorized_articles,
-                "total_articles": len(articles),
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-
-            # Firestore에 저장
-            db.collection("daily_summaries").document(daily_summary["id"]).set(daily_summary)
-
-            return {
-                "success": True,
-                "message": "일일 요약이 생성되었습니다.",
-                "data": daily_summary
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"일일 요약 생성 중 오류가 발생했습니다: {str(e)}"
-            }
-
-    async def _get_articles_by_date(self, date: str) -> List[Dict[str, Any]]:
-        """특정 날짜의 기사들 조회"""
-        try:
-            # 날짜 범위 설정 (해당 날짜 00:00:00 ~ 23:59:59)
-            start_date = datetime.strptime(date, "%Y-%m-%d")
-            end_date = start_date + timedelta(days=1)
-
-            articles_ref = db.collection("articles")
-            query = articles_ref.where("published_at", ">=", start_date).where("published_at", "<", end_date)
-
-            docs = query.stream()
-            return [doc.to_dict() for doc in docs]
-
-        except Exception as e:
-            print(f"날짜별 기사 조회 오류: {e}")
-            return []
-
-    def _categorize_articles(self, articles: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-        """기사들을 카테고리별로 분류"""
-        categories = {
-            "president": [],
-            "parliament": [],
-            "politics": [],
-            "breaking": []
-        }
-
-        for article in articles:
-            category = article.get("category", "politics")
-            if category in categories:
-                categories[category].append({
-                    "title": article["title"],
-                    "summary": article["summary"],
-                    "source": article["source"],
-                    "source_url": article["source_url"]
-                })
-
-        return categories
+            return {"success": False, "message": f"AI 요약 생성 중 오류: {str(e)}"}
 
     async def _generate_comprehensive_summary(self, categorized_articles: Dict[str, List[Dict[str, Any]]]) -> str:
         """카테고리별 기사들의 종합 요약 생성"""
@@ -248,31 +213,6 @@ class AISummaryService:
 
         except Exception as e:
             return [f"하이라이트 추출 중 오류가 발생했습니다: {str(e)}"]
-
-    async def get_daily_summary(self, date: str = None) -> Dict[str, Any]:
-        """일일 요약 조회"""
-        try:
-            if not date:
-                date = datetime.now().strftime("%Y-%m-%d")
-
-            summary_id = f"summary_{date}"
-            doc_ref = db.collection("daily_summaries").document(summary_id)
-            doc = doc_ref.get()
-
-            if doc.exists:
-                return {
-                    "success": True,
-                    "data": doc.to_dict()
-                }
-            else:
-                # 요약이 없으면 자동 생성
-                return await self.generate_daily_summary(date)
-
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"일일 요약 조회 중 오류가 발생했습니다: {str(e)}"
-            }
 
 # AI 요약 서비스 인스턴스 생성
 ai_summary_service = AISummaryService()
