@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status, Depends, HTTPException
-from models.model import UserUpdate, UserCreate, UserLogin, ResponseModel
+from models.model import UserUpdate, UserCreate, UserLogin, PasswordChangeRequest, ResponseModel
 from services.auth_service import auth_service
 from typing import Dict, Any
 
@@ -43,6 +43,17 @@ async def get_current_user_info(current_user: Dict[str, Any] = Depends(auth_serv
         }
     }
 
+@router.put("/password", response_model=ResponseModel)
+async def change_password(
+    req: PasswordChangeRequest,
+    # current_user: Dict[str, Any] = Depends(auth_service.get_current_user)
+):
+    """비밀번호 변경"""
+    result = await auth_service.change_password(req.email, req.password)
+    if result["success"]:
+        return result
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["message"])
+
 
 @router.put("/profile", response_model=ResponseModel)
 async def update_profile(
@@ -60,7 +71,7 @@ async def update_profile(
 
 @router.delete("/delete", response_model=ResponseModel)
 async def delete_profile(email: str):
-    """사용자 프로필 업데이트"""
+    """사용자 프로필 삭제"""
     result = await auth_service.delete_user(email=email)
     if result["success"]:
         return result

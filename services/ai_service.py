@@ -1,6 +1,8 @@
 import asyncio
 import google.generativeai as genai
 import os
+import re
+import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from firebase.firebase_config import db
@@ -8,26 +10,31 @@ import traceback
 
 class AISummaryService:
     def __init__(self):
-    #     self.client = OpenAI(
-    #         api_key=os.getenv("OPENAI_API_KEY")
-    #     )
-    #     print(self.client)
-    #     self.model = "gpt-3.5-turbo"
-    #     self.max_tokens = 100
         genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
         self.model = genai.GenerativeModel('gemini-2.5-pro')
     
-    async def summarize_by_category(title, summary, max_retries=3):
+    async def summarize_by_category(self, category, title, summary, max_retries=3):
         for attempt in range(max_retries):
             try:
-                return await ai_summary_service.summarize_by_category2(title, summary)
+                return await ai_summary_service.summarize_by_category2(category, title, summary)
             except Exception as e:
                 wait = 10 * (attempt + 1)
-                print(f"429 에러 발생, {wait}초 후 재시도...")
+                print(f"[WARN] AI 호출 실패({e}), {wait}초 후 재시도...")
                 await asyncio.sleep(wait)
         return {"success": False, "message": "요약 실패"}
 
     # ===== 프롬프트 빌더 =====
+    def _build_prompt(self, category: str, title: str, content: str) -> str:
+        """카테고리에 따라 적절한 프롬프트를 생성합니다."""
+        prompt_map = {
+            "대통령": self._build_president_prompt,
+            "정책": self._build_policy_prompt,
+            "정치인발언": self._build_statement_prompt,
+            "정치": self._build_general_politics_prompt,
+            "정부": self._build_general_politics_prompt
+        }
+        return prompt_map.get(category, self._build_general_politics_prompt)(title, content)
+
     def _build_president_prompt(self, title: str, content: str) -> str:
         return f"""
         당신은 한국 정치 전문 기자이자 데이터 분석가입니다.
@@ -111,25 +118,27 @@ class AISummaryService:
     # ===== AI 호출 메소드 =====
     async def summarize_by_category2(self, category: str, title: str, content: str):
         try:
-            prompt_map = {
-                "대통령": self._build_president_prompt,
-                "정책": self._build_policy_prompt,
-                "정치인발언": self._build_statement_prompt,
-                "정치": self._build_general_politics_prompt,
-                "정부": self._build_general_politics_prompt
-            }
-            prompt_builder = prompt_map.get(category, self._build_general_politics_prompt)
-            prompt = prompt_builder(title, content)
+            prompt = self._build_prompt(category, title, content)
 
-            response = self.model.generate_content(prompt)
-            raw_text = response.text.strip()
+            # Gemini API 호출 (비동기)
+            response = await asyncio.to_thread(self.model.generate_content, prompt)
 
-            # JSON 파싱
-            try:
-                parsed_data = json.loads(raw_text)
-            except json.JSONDecodeError:
-                return {"success": False, "message": "AI 응답이 JSON 형식이 아님", "raw": raw_text}
+            # 응답 텍스트 안전하게 추출
+            raw_text = ""
+            if hasattr(response, "candidates") and response.candidates:
+                parts = response.candidates[0].content.parts
+                if parts and hasattr(parts[0], "text"):
+                    raw_text = parts[0].text.strip()
 
+            if not raw_text:
+                return {"success": False, "message": "AI 응답이 비어있음"}
+
+            # JSON 추출
+            json_match = re.search(r"\{.*\}", raw_text, re.S)
+            if not json_match:
+                return {"success": False, "message": "AI 응답에서 JSON을 찾지 못함", "raw": raw_text}
+
+            parsed_data = json.loads(json_match.group())
             return {"success": True, "data": parsed_data}
 
         except Exception as e:

@@ -181,6 +181,19 @@ class AuthService:
         except Exception as e:
             print(f"사용자 조회 오류: {e}")
             return None
+        
+    async def change_password(self, user_id: str, new_password: str) -> Dict[str, Any]:
+        """비밀번호 변경"""
+        try:
+            hashed_password = self.get_password_hash(new_password)
+            doc_ref = db.collection("users").document(user_id)
+            doc = doc_ref.get()
+            if not doc.exists:
+                return {"success": False, "message": "사용자를 찾을 수 없습니다."}
+            doc_ref.update({"password_hash": hashed_password})
+            return {"success": True, "message": "비밀번호가 변경되었습니다."}
+        except Exception as e:
+            return {"success": False, "message": f"비밀번호 변경 중 오류가 발생했습니다: {str(e)}"}
 
     async def update_user_profile(self, user_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """사용자 프로필 업데이트"""
@@ -206,6 +219,18 @@ class AuthService:
 
         except Exception as e:
             return {"success": False, "message": f"프로필 업데이트 중 오류가 발생했습니다: {str(e)}"}
+        
+    async def delete_user(self, email: str) -> Dict[str, Any]:
+        """사용자 데이터 삭제"""
+        try:
+            doc_ref = db.collection("users").document(email)
+            doc = doc_ref.get()
+            if not doc.exists:
+                return {"success": False, "message": "사용자를 찾을 수 없습니다."}
+            doc_ref.delete()
+            return {"success": True, "message": "사용자 데이터가 삭제되었습니다."}
+        except Exception as e:
+            return {"success": False, "message": f"사용자 삭제 중 오류가 발생했습니다: {str(e)}"}
         
 
 auth_service = AuthService()

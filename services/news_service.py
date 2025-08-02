@@ -11,12 +11,13 @@ from services.ai_service import ai_summary_service
 import asyncio
 import requests
 from models.model import President, ParliamentaryActivity, PoliticalStatement
+from dateutil import parser as dateparser
 
 class NewsService:
     def __init__(self):
         self.rss_feeds = {
             "정치": [
-                "https://www.yna.co.kr/rss/politics.xml" # 연합뉴스 정치
+                "https://www.yna.co.kr/rss/politics.xml", # 연합뉴스 정치
                 "https://www.yonhapnewstv.co.kr/category/news/politics/feed/", # 연합뉴스TV 정치
                 "https://rss.hankyung.com/politics.xml", # 한국경제 정치
                 "http://www.segye.com/Articles/RSSFeed/Politics.xml", # 세계일보 정치
@@ -174,14 +175,13 @@ class NewsService:
                             if await self._is_article_exists(article_id):
                                 continue
 
-                            ai_result = await ai_summary_service.summarize_by_category(title, summary)
+                            ai_result = await ai_summary_service.summarize_by_category(category_name, title, summary)
                             await asyncio.sleep(15)
                             if not ai_result["success"]:
                                 print(f"AI 요약 실패: {ai_result['message']}")
                                 continue
                             # ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
-                            published = entry.get('published_parsed')
-                            published_at = (datetime(*published[:6]) if isinstance(published, tuple) else datetime.now())
+                            
                             ai_data = ai_result["data"]
 
                             # 정책
@@ -190,7 +190,7 @@ class NewsService:
                                     title=title,
                                     context= ai_data.get("context", ""),
                                     type= ai_data.get("type", ""),
-                                    date=published_at.strftime("%Y-%m-%d"),
+                                    date=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     status= ai_data.get("status", ""),
                                     proposer=ai_data.get("proposer", None),
                                     category=ai_data.get("category", ""),
@@ -211,9 +211,9 @@ class NewsService:
                                     status= ai_data.get("status", ""),
                                     category= ai_data.get("category", ""),
                                     progress= ai_data.get("progress", None),
-                                    last_update=published_at.strftime("%Y-%m-%d"),
+                                    last_update=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     related_links=[source_url],
-                                    date=published_at.strftime("%Y-%m-%d"),
+                                    date=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                                 ).dict()
 
@@ -230,7 +230,7 @@ class NewsService:
                                     "image_url": image_url,
                                     "category": ArticleCategory.GOVERNMENT.value,
                                     "keywords": self._extract_keywords(title, summary),
-                                    "published_at": published_at,
+                                    "published_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     "created_at": datetime.utcnow(),
                                     "updated_at": datetime.utcnow(),
                                     "view_count": 0,
@@ -249,7 +249,7 @@ class NewsService:
                                     "image_url": image_url,
                                     "category": category_name,
                                     "keywords": self._extract_keywords(title, summary),
-                                    "published_at": published_at,
+                                    "published_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     "created_at": datetime.utcnow(),
                                     "updated_at": datetime.utcnow(),
                                     "view_count": 0,
@@ -268,7 +268,7 @@ class NewsService:
                                     category= ai_data.get("category", ""),
                                     type= ai_data.get("type", ""),
                                     related_links=source_url,
-                                    date=published_at.strftime("%Y-%m-%d"),
+                                    date=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                                 ).dict()
                                 db.collection("statements").document(statement_id).set(statement_data)
@@ -399,6 +399,7 @@ class NewsService:
 
         except Exception as e:
             return {"success": False, "message": f"기사 조회 중 오류가 발생했습니다: {str(e)}"}
+        
 
 # 뉴스 서비스 인스턴스 생성
 news_service = NewsService()

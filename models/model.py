@@ -19,6 +19,10 @@ class UserUpdate(BaseModel):
     interests: Optional[List[str]] = None
     notification_enabled: Optional[bool] = None
 
+class PasswordChangeRequest(BaseModel):
+    password: str
+    email: Optional[str] = None
+
 class User(UserBase):
     uid: str
     created_at: datetime
