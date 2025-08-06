@@ -14,10 +14,21 @@ class FirebaseConfig:
     def _initialize_firebase(self):
         try:
             # Firebase 서비스 계정 정보를 환경 변수에서 가져오기
-            cred_path = os.getenv("FIREBASE_CREDENTIAL_PATH")
+            firebase_config = {
+                "type": os.getenv("FIREBASE_TYPE"),
+                "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+                "private_key": os.getenv("FIREBASE_PRIVATE_KEY").replace("\\n", "\n"),
+                "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+                "auth_uri": os.getenv("FIREBASE_AUTH_URI"),
+                "token_uri": os.getenv("FIREBASE_TOKEN_URI"),
+                "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL"),
+                "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_X509_CERT_URL")
+            }
 
             # 자격 증명 객체 생성
-            cred = credentials.Certificate(cred_path)
+            cred = credentials.Certificate(firebase_config)
 
             # Firebase 앱 초기화 (이미 초기화된 경우 건너뛰기)
             if not firebase_admin._apps:
