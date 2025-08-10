@@ -17,9 +17,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
+allow_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+allow_origins.append("https://koreanpolitical.web.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=allow_origins,  # 기존에 로드한 것과 추가된 도메인 포함
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
