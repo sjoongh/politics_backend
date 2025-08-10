@@ -19,6 +19,7 @@ app = FastAPI(
 
 allow_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 allow_origins.append("https://koreanpolitical.web.app")
+allow_origins.append("https://koreanpolitical.firebaseapp.com")
 
 app.add_middleware(
     CORSMiddleware,
