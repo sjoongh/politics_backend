@@ -2,7 +2,7 @@ import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth_router, bookmark_router, comment_router, feedback_router, news_router, notification_router, politics_router, statistic_router, summary_router
+from routers import auth_router, bookmark_router, comment_router, feedback_router, news_router, notification_router, politics_router, statistic_router, summary_router, health_check_router
 import os
 from common.exception_handlers import http_exception_handler, general_exception_handler  # 위에서 만든 함수들
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -52,3 +52,4 @@ app.include_router(notification_router.router, prefix="/api/notifications")
 app.include_router(politics_router.router, prefix="/api/politics")
 app.include_router(statistic_router.router, prefix="/api/statistic")
 app.include_router(summary_router.router, prefix="/api/summaries")
+app.include_router(health_check_router.router, prefix="/healthz") # 헬스 체크용 라우터 추가
