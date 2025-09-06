@@ -1,6 +1,9 @@
 from fastapi import APIRouter, status
 from models.model import ResponseModel
+from typing import List
 from services.politics_service import politics_service
+from models.model import ParliamentaryActivity
+from models.model import PoliticalStatement
 
 router = APIRouter()
 
@@ -43,3 +46,19 @@ async def get_statements():
         "message": "정치인 발언 조회 성공",
         "data": {"statements": data}
     }
+
+@router.post("/policy")
+async def create_policies(activities: List[ParliamentaryActivity]):
+    results = []
+    for activity in activities:
+        result = await politics_service.save_parliamentary_activity(activity)
+        results.append(result)
+    return results
+
+@router.post("/statements")
+async def create_statements(statements: List[PoliticalStatement]):
+    results = []
+    for statement in statements:
+        result = await politics_service.save_political_statement(statement)
+        results.append(result)
+    return results
