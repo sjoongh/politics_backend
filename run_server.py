@@ -22,7 +22,7 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=port,
-        reload=debug_mode,
+        reload=False,
         access_log=True,
         log_level="info"
     )

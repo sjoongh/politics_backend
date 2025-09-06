@@ -4,11 +4,31 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth_router, bookmark_router, comment_router, feedback_router, news_router, notification_router, politics_router, statistic_router, summary_router, health_check_router
 import os
+import uvicorn
 from common.exception_handlers import http_exception_handler, general_exception_handler  # 위에서 만든 함수들
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # 환경 변수 로드
 load_dotenv()
+
+if __name__ == "__main__":
+    # 개발 환경 설정
+    debug_mode = os.getenv("DEBUG", "True").lower() == "true"
+    port = int(os.getenv("PORT", "8000"))
+
+    print("🚀 정치 뉴스 추적 API 서버를 시작합니다...")
+    print(f"📍 서버 주소: http://localhost:{port}")
+    print(f"📖 API 문서: http://localhost:{port}/docs")
+    print(f"🔧 디버그 모드: {debug_mode}")
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        access_log=True,
+        log_level="info"
+    )
 
 # FastAPI 앱 생성
 app = FastAPI(
