@@ -1,0 +1,24 @@
+[
+  {
+    "name": "예시의원A",
+    "party": "예시당",
+    "district": "서울 예시구",
+    "committee": "예시위원회",
+    "term": "22대",
+    "photo_url": null,
+    "source_url": "https://open.assembly.go.kr",
+    "criminal_records": [
+      {"offense": "예시법위반(가공 데이터)", "disposition": "벌금 100만원", "year": "2021", "is_final": true, "source_url": "https://info.nec.go.kr"}
+    ]
+  },
+  {
+    "name": "예시의원B",
+    "party": "예시당2",
+    "district": "부산 예시구",
+    "committee": "예시위원회2",
+    "term": "22대",
+    "photo_url": null,
+    "source_url": "https://open.assembly.go.kr",
+    "criminal_records": []
+  }
+]
