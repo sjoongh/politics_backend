@@ -165,3 +165,22 @@ class Pagination(BaseModel):
     limit: int = 20
     offset: int = 0
     total_count: Optional[int] = None
+
+# 국회의원 책임성 (프로필 + 전과)
+class CriminalRecord(BaseModel):
+    offense: str            # 죄명
+    disposition: str        # 형/처분 (예: "벌금 100만원")
+    year: Optional[str] = None
+    is_final: bool = True   # 확정 여부 (False면 노출 제외)
+    source_url: str         # 공식 출처 (필수)
+
+
+class MemberCreate(BaseModel):
+    name: str
+    party: Optional[str] = None
+    district: Optional[str] = None
+    committee: Optional[str] = None
+    term: Optional[str] = None
+    photo_url: Optional[str] = None
+    source_url: Optional[str] = None
+    criminal_records: List[CriminalRecord] = []
