@@ -259,19 +259,19 @@ class NewsService:
                                 collected_articles.append(article_data)
                             # AI 정치인 발언 추출 (예시: ai_result에 정치인 발언 정보가 있을 경우)
                             else:
-                                statement_id = self._generate_article_id(ai_data.get("spaker", ""), ai_data.get("context", ""))
+                                statement_id = self._generate_article_id(ai_data.get("speaker", ""), ai_data.get("context", ""))
                                 statement_data = PoliticalStatement(
-                                    spaker=ai_data.get("speaker", ""),
+                                    speaker=ai_data.get("speaker", ""),
                                     party=ai_data.get("party", ""),
                                     speak_reason= ai_data.get("speak_reason", ""),
                                     context=ai_data.get("context", ""),
                                     category= ai_data.get("category", ""),
                                     type= ai_data.get("type", ""),
-                                    related_links=source_url,
+                                    related_links=[source_url],
                                     date=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                                 ).dict()
-                                db.collection("statements").document(statement_id).set(statement_data)
+                                db.collection("political_statements").document(statement_id).set(statement_data)
                                 collected_statements.append(statement_data)
                                 continue  # 정치인 발언은 기사 저장에서 제외
 
@@ -365,7 +365,7 @@ class NewsService:
             for doc in docs:
                 article = doc.to_dict()
                 if (query.lower() in article.get("title", "").lower() or 
-                    query.lower() in article.get("summary", "").lower()):
+                    query.lower() in article.get("ai_summary", "").lower()):
                     matched_articles.append(article)
 
                 if len(matched_articles) >= limit:

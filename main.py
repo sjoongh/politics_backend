@@ -40,7 +40,7 @@ async def root():
 # 헬스 체크
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}
 
 # 라우터 등록
 app.include_router(auth_router.router, prefix="/api/auth")
