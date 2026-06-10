@@ -183,3 +183,9 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,firebase
+
+# 보안: 서비스 계정 키 절대 커밋 금지
+firebase-adminsdk.json
+*-adminsdk*.json
+serviceAccount*.json
+*serviceaccount*.json
