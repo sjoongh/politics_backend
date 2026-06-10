@@ -23,8 +23,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 기존에 로드한 것과 추가된 도메인 포함
-    allow_credentials=True,
+    allow_origins=["*"],  # 모든 오리진 허용(웹/모바일). 자격증명 미사용이라 와일드카드 유효.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
