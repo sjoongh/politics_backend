@@ -3,7 +3,11 @@
 """
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.model import MemberCreate
 from services.member_service import member_service

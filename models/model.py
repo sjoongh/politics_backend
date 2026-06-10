@@ -184,3 +184,24 @@ class MemberCreate(BaseModel):
     photo_url: Optional[str] = None
     source_url: Optional[str] = None
     criminal_records: List[CriminalRecord] = []
+
+# 이슈 추적 (타임라인)
+class OfficialLink(BaseModel):
+    label: str
+    url: str
+
+class EventSeed(BaseModel):
+    date: str
+    headline: str
+    summary: str = ""
+    source_url: str = ""
+    article_ids: List[str] = []
+
+class IssueSeed(BaseModel):
+    title: str
+    summary: str = ""
+    status: str = "진행중"
+    category: str = "정치"
+    slug: Optional[str] = None
+    keywords: List[str] = []
+    official_links: List[OfficialLink] = []

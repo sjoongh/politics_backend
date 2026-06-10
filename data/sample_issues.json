@@ -1,0 +1,30 @@
+[
+  {
+    "title": "추가경정예산안 처리",
+    "summary": "정부가 제출한 추가경정예산안의 국회 심사·처리 경과.",
+    "status": "가결",
+    "category": "정책",
+    "keywords": ["추경", "예산", "본회의"],
+    "official_links": [
+      {"label": "국회 의안정보시스템", "url": "https://likms.assembly.go.kr/bill/main.do"}
+    ],
+    "events": [
+      {"date": "2026-05-20", "headline": "예결위 심사 통과", "summary": "예산결산특별위원회가 추경안을 의결.", "source_url": "https://www.assembly.go.kr"},
+      {"date": "2026-05-28", "headline": "본회의 가결", "summary": "본회의에서 추가경정예산안이 가결됨.", "source_url": "https://www.assembly.go.kr"}
+    ]
+  },
+  {
+    "title": "선거관리위원회 재투표 논란",
+    "summary": "특정 선거구 재투표 관련 선관위 결정과 후속 경과.",
+    "status": "진행중",
+    "category": "정치",
+    "keywords": ["선관위", "재투표"],
+    "official_links": [
+      {"label": "중앙선거관리위원회", "url": "https://www.nec.go.kr"}
+    ],
+    "events": [
+      {"date": "2026-06-01", "headline": "재투표 요구 접수", "summary": "재투표 관련 이의가 접수됨.", "source_url": "https://www.nec.go.kr"},
+      {"date": "2026-06-05", "headline": "선관위 심의 진행", "summary": "선관위가 관련 안건을 심의 중.", "source_url": "https://www.nec.go.kr"}
+    ]
+  }
+]

@@ -189,3 +189,4 @@ firebase-adminsdk.json
 *-adminsdk*.json
 serviceAccount*.json
 *serviceaccount*.json
+.omc/
