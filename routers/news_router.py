@@ -1,4 +1,5 @@
-from fastapi import HTTPException, APIRouter, status, Depends
+import os
+from fastapi import HTTPException, APIRouter, status, Depends, BackgroundTasks, Header
 from typing import Dict, Any, Optional
 
 from services.auth_service import auth_service
@@ -6,6 +7,12 @@ from models.model import ResponseModel
 from services.news_service import news_service
 
 router = APIRouter()
+
+
+def _require_admin(x_admin_key: Optional[str]):
+    expected = os.getenv("ADMIN_KEY")
+    if not expected or x_admin_key != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="관리자 권한이 필요합니다.")
 
 @router.get("/list", response_model=ResponseModel)
 async def get_news(
@@ -32,17 +39,14 @@ async def search_news(
     return result
 
 @router.post("/collect", response_model=ResponseModel)
-async def collect_news():
-    # current_user: Dict[str, Any] = Depends(auth_service.get_current_user)
-    """뉴스 수집 (관리자만 가능)"""
-    #if current_user.get("role") != "admin":
-    #    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="권한이 없습니다.")
-
-    #result = await NewsService.collect_news_from_rss()
-    #if not result["success"]:
-    #    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
-    #return result
-    return await news_service.collect_news_from_rss()
+async def collect_news(
+    background_tasks: BackgroundTasks,
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+):
+    """뉴스 수집을 백그라운드로 시작(비차단). 관리자 키 필요."""
+    _require_admin(x_admin_key)
+    background_tasks.add_task(news_service.collect_news_from_rss)
+    return {"success": True, "message": "뉴스 수집을 시작했습니다.", "data": {"status": "started"}}
 
 @router.get("/{article_id}", response_model=ResponseModel)
 async def get_news_detail(article_id: str):
