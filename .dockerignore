@@ -1,0 +1,15 @@
+.venv/
+.git/
+.gitignore
+.env
+.env.*
+__pycache__/
+*.pyc
+*.pyo
+.omc/
+.superpowers/
+docs/
+tests/
+firebase-adminsdk.json
+*-adminsdk*.json
+serviceAccount*.json
