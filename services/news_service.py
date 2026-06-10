@@ -10,6 +10,7 @@ import re
 from services.ai_service import ai_summary_service
 import asyncio
 import requests
+from utils.collect_config import ai_throttle_seconds
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
 
@@ -176,7 +177,7 @@ class NewsService:
                                 continue
 
                             ai_result = await ai_summary_service.summarize_by_category(category_name, title, summary)
-                            await asyncio.sleep(15)
+                            await asyncio.sleep(ai_throttle_seconds())
                             if not ai_result["success"]:
                                 print(f"AI 요약 실패: {ai_result['message']}")
                                 continue
@@ -275,7 +276,7 @@ class NewsService:
                                 collected_statements.append(statement_data)
                                 continue  # 정치인 발언은 기사 저장에서 제외
 
-                        time.sleep(self.request_delay)
+                        await asyncio.sleep(self.request_delay)
 
                     except Exception as e:
                         print(f"RSS 피드 처리 오류 ({feed_url}): {e}")
