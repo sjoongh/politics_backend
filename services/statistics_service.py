@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from firebase.firebase_config import db
 
 class StatisticsService:
-    async def get_statistics_data():
+    async def get_statistics_data(self):
         articles_ref = db.collection("articles")
         users_ref = db.collection("users")
 

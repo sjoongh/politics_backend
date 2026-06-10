@@ -153,7 +153,7 @@ class PoliticalStatement(BaseModel):
 # API 응답 모델
 class ResponseModel(BaseModel):
     success: bool
-    message: str
+    message: str = ""
     data: Optional[Any] = None
 
 class ErrorResponse(BaseModel):

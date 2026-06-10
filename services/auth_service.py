@@ -48,7 +48,8 @@ class AuthService:
         except jwt.PyJWTError:
             return None
         
-    def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
+    @staticmethod
+    async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> Dict[str, Any]:
         """JWT 토큰을 통한 현재 사용자 인증"""
         token = credentials.credentials
         payload = auth_service.verify_token(token)
@@ -60,7 +61,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        user = auth_service.get_user_by_id(payload.get("sub"))
+        user = await auth_service.get_user_by_id(payload.get("sub"))
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

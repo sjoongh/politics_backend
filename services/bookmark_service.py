@@ -4,7 +4,7 @@ from google.cloud import firestore
 from models.model import BookmarkBase
 
 class BookmarkService:
-    def add_bookmark(user_id: str, bookmark_data: BookmarkBase):
+    def add_bookmark(self, user_id: str, bookmark_data: BookmarkBase):
         bookmark_id = f"bookmark_{user_id}_{bookmark_data.article_id}"
 
         bookmark = {
@@ -17,7 +17,7 @@ class BookmarkService:
         db.collection("bookmarks").document(bookmark_id).set(bookmark)
         return bookmark
 
-    def get_bookmarks(user_id: str, limit: int = 20):
+    def get_bookmarks(self, user_id: str, limit: int = 20):
         bookmarks_ref = db.collection("bookmarks")
         query = bookmarks_ref.where("user_id", "==", user_id)
         query = query.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit)

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from firebase_admin import firestore
+from firebase.firebase_config import db
 
 router = APIRouter()
 

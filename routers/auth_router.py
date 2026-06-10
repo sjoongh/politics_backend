@@ -32,10 +32,10 @@ async def get_current_user_info(current_user: Dict[str, Any] = Depends(auth_serv
         "message": "사용자 정보 조회 성공",
         "data": {
             "user": {
-                "uid": current_user["uid"],
-                "email": current_user["email"],
-                "name": current_user["name"],
-                "role": current_user["role"],
+                "uid": current_user.get("email"),
+                "email": current_user.get("email"),
+                "name": current_user.get("nick_name"),
+                "role": current_user.get("role"),
                 "interests": current_user.get("interests", []),
                 "notification_enabled": current_user.get("notification_enabled", True),
                 "avatar_url": current_user.get("avatar_url")
@@ -62,7 +62,7 @@ async def update_profile(
 ):
     """사용자 프로필 업데이트"""
     result = await auth_service.update_user_profile(
-        current_user["uid"], 
+        current_user["email"],
         update_data.dict(exclude_unset=True)
     )
     if result["success"]:
