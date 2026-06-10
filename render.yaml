@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: politics-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_server.py
+    healthCheckPath: /health
+    envVars:
+      # 값은 Render 대시보드에서 입력(레포에 비밀키 저장 안 함). politics_backend/.env 참고.
+      - key: FIREBASE_TYPE
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY_ID
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_CLIENT_ID
+        sync: false
+      - key: FIREBASE_AUTH_URI
+        sync: false
+      - key: FIREBASE_TOKEN_URI
+        sync: false
+      - key: FIREBASE_AUTH_PROVIDER_X509_CERT_URL
+        sync: false
+      - key: FIREBASE_CLIENT_X509_CERT_URL
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: AI_THROTTLE_SEC
+        value: "2"
