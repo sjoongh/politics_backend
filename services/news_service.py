@@ -11,6 +11,7 @@ from services.ai_service import ai_summary_service
 import asyncio
 import requests
 from utils.collect_config import ai_throttle_seconds
+from utils.article_fetch import fetch_article_text
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
 
@@ -172,11 +173,15 @@ class NewsService:
 
                             article_id = self._generate_article_id(title, source_url)
 
-                            # 중복 확인
-                            if await self._is_article_exists(article_id):
+                            # 중복 확인 (카테고리별 대상 컬렉션에서)
+                            if await self._doc_exists(self._target_collection(category_name), article_id):
                                 continue
 
-                            ai_result = await ai_summary_service.summarize_by_category(category_name, title, summary)
+                            # 기사 본문 크롤링 (실패 시 RSS 요약으로 폴백)
+                            body = await asyncio.to_thread(fetch_article_text, source_url)
+                            content = body or summary
+
+                            ai_result = await ai_summary_service.summarize_by_category(category_name, title, content)
                             await asyncio.sleep(ai_throttle_seconds())
                             if not ai_result["success"]:
                                 print(f"AI 요약 실패: {ai_result['message']}")
@@ -197,7 +202,7 @@ class NewsService:
                                     category=ai_data.get("category", ""),
                                     committee=ai_data.get("committee", None),
                                     bill_number= ai_data.get("bill_number", None),
-                                    description=summary,
+                                    description=content,
                                     related_links=[source_url],
                                     created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                                 ). dict()
@@ -258,6 +263,29 @@ class NewsService:
                                 }
                                 db.collection("articles").document(article_id).set(article_data)
                                 collected_articles.append(article_data)
+
+                                # 정치 기사에서 정치인 발언 2차 추출 (발언자 식별 시 저장)
+                                stmt_res = await ai_summary_service.summarize_by_category("정치인발언", title, content)
+                                if stmt_res.get("success"):
+                                    sd = stmt_res["data"]
+                                    speaker = (sd.get("speaker") or "").strip()
+                                    if speaker and speaker.lower() != "none":
+                                        statement_id = self._generate_article_id(speaker, sd.get("context", "") or "")
+                                        if not await self._doc_exists("political_statements", statement_id):
+                                            statement_data = PoliticalStatement(
+                                                speaker=speaker,
+                                                party=sd.get("party", "") or "",
+                                                speak_reason=sd.get("speak_reason", "") or "",
+                                                context=sd.get("context", "") or "",
+                                                category=sd.get("category", "") or "",
+                                                type=sd.get("type", "") or "",
+                                                related_links=[source_url],
+                                                date=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                                                created_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                            ).dict()
+                                            db.collection("political_statements").document(statement_id).set(statement_data)
+                                            collected_statements.append(statement_data)
+                                    await asyncio.sleep(ai_throttle_seconds())
                             # AI 정치인 발언 추출 (예시: ai_result에 정치인 발언 정보가 있을 경우)
                             else:
                                 statement_id = self._generate_article_id(ai_data.get("speaker", ""), ai_data.get("context", ""))
@@ -313,6 +341,20 @@ class NewsService:
             doc = doc_ref.get()
             return doc.exists
         except:
+            return False
+
+    def _target_collection(self, category_name: str) -> str:
+        """카테고리별 저장 대상 컬렉션."""
+        return {
+            "대통령": "presidents",
+            "정책": "parliamentary_activities",
+        }.get(category_name, "articles")
+
+    async def _doc_exists(self, collection_name: str, doc_id: str) -> bool:
+        """지정 컬렉션에 문서 존재 여부."""
+        try:
+            return db.collection(collection_name).document(doc_id).get().exists
+        except Exception:
             return False
 
     async def get_articles(self, 
