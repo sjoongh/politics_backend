@@ -6,6 +6,7 @@ from models.model import IssueSeed, EventSeed
 from utils.issue_rules import (
     is_valid_status, to_summary, sort_events, article_public, patchable,
 )
+from utils.source_bias import source_leaning, bias_breakdown
 
 COLLECTION = "issues"
 
@@ -58,6 +59,18 @@ class IssueService:
             if adoc.exists:
                 articles.append(article_public(adoc.to_dict()))
         issue["articles"] = articles
+        groups = {"left": [], "center": [], "right": [], "foreign": [], "official": [], "unknown": []}
+        for a in articles:
+            groups[source_leaning(a.get("source", ""))].append({
+                "title": a.get("title"),
+                "source": a.get("source"),
+                "source_url": a.get("source_url"),
+            })
+        issue["perspectives"] = {
+            "breakdown": bias_breakdown(articles),
+            "groups": groups,
+            "disclaimer": "매체 성향 분류는 통용되는 기준을 참고한 값이며 절대적이지 않습니다.",
+        }
         return {"success": True, "message": "이슈 상세 조회 성공", "data": issue}
 
     @staticmethod
