@@ -48,6 +48,12 @@ async def collect_news(
     background_tasks.add_task(news_service.collect_news_from_rss)
     return {"success": True, "message": "뉴스 수집을 시작했습니다.", "data": {"status": "started"}}
 
+@router.get("/digest", response_model=ResponseModel)
+async def get_digest(interests: str = "", limit: int = 30):
+    """관심 키워드(쉼표구분)로 맞춤 기사 조회."""
+    items = [i for i in interests.split(",") if i.strip()]
+    return await news_service.get_digest(items, limit)
+
 @router.get("/{article_id}", response_model=ResponseModel)
 async def get_news_detail(article_id: str):
     """뉴스 상세 조회"""
