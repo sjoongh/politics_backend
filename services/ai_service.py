@@ -7,21 +7,27 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from firebase.firebase_config import db
 import traceback
+from utils.ai_parsing import extract_json_block
 
 class AISummaryService:
     def __init__(self):
         genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        self.model = genai.GenerativeModel('gemini-2.5-pro')
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model = genai.GenerativeModel(self.model_name)
     
     async def summarize_by_category(self, category, title, summary, max_retries=3):
+        last = {"success": False, "message": "요약 실패"}
         for attempt in range(max_retries):
             try:
-                return await ai_summary_service.summarize_by_category2(category, title, summary)
+                result = await self.summarize_by_category2(category, title, summary)
+                if result.get("success"):
+                    return result
+                last = result
             except Exception as e:
-                wait = 10 * (attempt + 1)
-                print(f"[WARN] AI 호출 실패({e}), {wait}초 후 재시도...")
-                await asyncio.sleep(wait)
-        return {"success": False, "message": "요약 실패"}
+                last = {"success": False, "message": str(e)}
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 * (attempt + 1))
+        return last
 
     # ===== 프롬프트 빌더 =====
     def _build_prompt(self, category: str, title: str, content: str) -> str:
@@ -133,12 +139,10 @@ class AISummaryService:
             if not raw_text:
                 return {"success": False, "message": "AI 응답이 비어있음"}
 
-            # JSON 추출
-            json_match = re.search(r"\{.*\}", raw_text, re.S)
-            if not json_match:
-                return {"success": False, "message": "AI 응답에서 JSON을 찾지 못함", "raw": raw_text}
-
-            parsed_data = json.loads(json_match.group())
+            # JSON 추출 (견고)
+            parsed_data = extract_json_block(raw_text)
+            if parsed_data is None:
+                return {"success": False, "message": "AI 응답에서 JSON 파싱 실패", "raw": raw_text}
             return {"success": True, "data": parsed_data}
 
         except Exception as e:
