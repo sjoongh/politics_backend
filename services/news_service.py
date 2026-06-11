@@ -25,6 +25,10 @@ class NewsService:
                 "http://www.segye.com/Articles/RSSFeed/Politics.xml", # 세계일보 정치
                 "http://www.hani.co.kr/rss/politics/", # 한겨레 정치
                 "https://rss.donga.com/politics.xml",  # 동아일보 정치
+                "https://feeds.bbci.co.uk/korean/rss.xml",  # BBC 코리아 (외신)
+                "http://www.khan.co.kr/rss/rssdata/politic_news.xml",  # 경향신문 정치
+                "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=01",  # SBS 정치
+                "http://rss.ohmynews.com/rss/politics.xml",  # 오마이뉴스 정치
             ],
             "대통령": [
                 "https://www.korea.kr/rss/president.xml",  # 대통령실 공식
@@ -46,6 +50,8 @@ class NewsService:
             "hankyung.com": "한국경제", "segye.com": "세계일보",
             "hani.co.kr": "한겨레", "donga.com": "동아일보",
             "sedaily.com": "서울경제",
+            "bbc.co.uk": "BBC 코리아", "bbci.co.uk": "BBC 코리아",
+            "khan.co.kr": "경향신문", "sbs.co.kr": "SBS", "ohmynews.com": "오마이뉴스",
             "president": "대통령실", "policy": "정책 뉴스", "ebriefing": "부처별 브리핑"
         }
 
