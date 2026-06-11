@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from firebase.firebase_config import db
+from google.cloud import firestore
 import traceback
 from utils.ai_parsing import extract_json_block
 
@@ -150,54 +151,39 @@ class AISummaryService:
             return {"success": False, "message": f"AI 요약 생성 중 오류: {str(e)}"}
 
     async def _generate_comprehensive_summary(self, categorized_articles: Dict[str, List[Dict[str, Any]]]) -> str:
-        """카테고리별 기사들의 종합 요약 생성"""
+        """카테고리별 기사 제목으로 하루 종합 요약 생성 (Gemini)."""
         try:
-            # 각 카테고리의 기사 제목들을 수집
             category_summaries = []
-
             for category, articles in categorized_articles.items():
                 if articles:
                     category_name = {
                         "president": "대통령 관련",
-                        "parliament": "국회 관련", 
+                        "parliament": "국회 관련",
                         "politics": "정치 일반",
-                        "breaking": "주요 속보"
+                        "breaking": "주요 속보",
+                        "government": "정부 브리핑",
                     }.get(category, category)
-
-                    titles = [article["title"] for article in articles[:5]]  # 최대 5개까지
-                    category_text = f"{category_name}: " + ", ".join(titles)
-                    category_summaries.append(category_text)
+                    titles = [a.get("title", "") for a in articles[:5] if a.get("title")]
+                    if titles:
+                        category_summaries.append(f"{category_name}: " + ", ".join(titles))
 
             if not category_summaries:
                 return "오늘은 주요 정치 뉴스가 없었습니다."
 
-            # OpenAI를 통한 종합 요약
-            prompt = f"""
-            다음은 오늘의 한국 정치 뉴스 제목들입니다. 이를 바탕으로 하루의 정치 상황을 3-4문장으로 종합 요약해주세요:
-            {chr(10).join(category_summaries)}
-            요약 시 다음 사항을 고려해주세요:
-            1. 가장 중요한 이슈를 우선적으로 언급
-            2. 객관적이고 중립적인 톤 유지
-            3. 정치적 편향 없이 사실 중심으로 서술
-            """
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "당신은 한국 정치 전문 기자입니다. 하루의 정치 뉴스를 종합하여 객관적이고 간결한 요약을 제공합니다."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=300,
-                temperature=0.3
+            prompt = (
+                "다음은 오늘의 한국 정치 뉴스 제목들입니다. 이를 바탕으로 하루의 정치 상황을 "
+                "3-4문장으로 종합 요약하세요. 가장 중요한 이슈를 우선 언급하고, 객관적·중립적인 톤으로 "
+                "정치적 편향 없이 사실 중심으로 서술하세요.\n\n"
+                + "\n".join(category_summaries)
             )
 
-            return response.choices[0].message.content.strip()
+            response = await asyncio.to_thread(self.model.generate_content, prompt)
+            text = ""
+            if hasattr(response, "candidates") and response.candidates:
+                parts = response.candidates[0].content.parts
+                if parts and hasattr(parts[0], "text"):
+                    text = parts[0].text.strip()
+            return text or "요약을 생성하지 못했습니다."
 
         except Exception as e:
             return f"종합 요약 생성 중 오류가 발생했습니다: {str(e)}"
@@ -210,7 +196,7 @@ class AISummaryService:
 
             highlighted_articles = []
             for article in articles:
-                title = article["title"]
+                title = article.get("title", "")
                 score = sum(1 for keyword in important_keywords if keyword in title)
                 if score > 0:
                     highlighted_articles.append((article, score))
@@ -220,12 +206,71 @@ class AISummaryService:
             highlights = []
 
             for article, _ in highlighted_articles[:5]:
-                highlights.append(f"• {article['title']}")
+                highlights.append(f"• {article.get('title', '')}")
 
             return highlights if highlights else ["오늘은 특별한 정치 이슈가 없었습니다."]
 
         except Exception as e:
             return [f"하이라이트 추출 중 오류가 발생했습니다: {str(e)}"]
+
+    async def get_daily_summary(self, date: str = None) -> Dict[str, Any]:
+        """일일 요약 조회. 없으면 success=True + summary=None."""
+        try:
+            day = date or datetime.utcnow().strftime("%Y-%m-%d")
+            doc = db.collection("daily_summaries").document(day).get()
+            data = doc.to_dict() if doc.exists else None
+            return {
+                "success": True,
+                "message": "조회 성공" if data else "해당 일자 요약이 아직 없습니다.",
+                "data": {"summary": data},
+            }
+        except Exception as e:
+            return {"success": False, "message": f"일일 요약 조회 오류: {str(e)}"}
+
+    async def generate_daily_summary(self, date: str = None) -> Dict[str, Any]:
+        """해당 일자 기사로 종합 요약/하이라이트 생성 후 저장."""
+        try:
+            day = date or datetime.utcnow().strftime("%Y-%m-%d")
+            start, end = f"{day} 00:00:00", f"{day} 23:59:59"
+            docs = (
+                db.collection("articles")
+                .where("published_at", ">=", start)
+                .where("published_at", "<=", end)
+                .stream()
+            )
+            articles = [d.to_dict() for d in docs]
+            if not articles:
+                # 해당 일자 기사가 없으면 최근 기사로 대체
+                recent = (
+                    db.collection("articles")
+                    .order_by("published_at", direction=firestore.Query.DESCENDING)
+                    .limit(20)
+                    .stream()
+                )
+                articles = [d.to_dict() for d in recent]
+
+            categorized: Dict[str, List[Dict[str, Any]]] = {}
+            for a in articles:
+                categorized.setdefault(a.get("category", "politics"), []).append(a)
+
+            overview = await self._generate_comprehensive_summary(categorized)
+            highlights = await self._extract_highlights(articles)
+
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            record = {
+                "id": day,
+                "date": day,
+                "overview": overview,
+                "highlights": highlights,
+                "article_count": len(articles),
+                "created_at": now,
+                "updated_at": now,
+            }
+            db.collection("daily_summaries").document(day).set(record)
+            return {"success": True, "message": "일일 요약 생성 완료", "data": {"summary": record}}
+        except Exception as e:
+            traceback.print_exc()
+            return {"success": False, "message": f"일일 요약 생성 오류: {str(e)}"}
 
 # AI 요약 서비스 인스턴스 생성
 ai_summary_service = AISummaryService()
