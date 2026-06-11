@@ -12,6 +12,7 @@ import asyncio
 import requests
 from utils.collect_config import ai_throttle_seconds
 from utils.article_fetch import fetch_article_text
+from utils.digest import matches_interests
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
 
@@ -448,7 +449,26 @@ class NewsService:
 
         except Exception as e:
             return {"success": False, "message": f"기사 조회 중 오류가 발생했습니다: {str(e)}"}
-        
+
+    async def get_digest(self, interests, limit: int = 30) -> Dict[str, Any]:
+        """관심 키워드로 최근 기사 필터."""
+        try:
+            if not interests:
+                return {"success": True, "message": "관심사가 없습니다.", "data": {"articles": [], "count": 0}}
+            query = (db.collection("articles")
+                     .order_by("published_at", direction=firestore.Query.DESCENDING)
+                     .limit(100))
+            matched = []
+            for doc in query.stream():
+                a = doc.to_dict()
+                if matches_interests(a, interests):
+                    matched.append(a)
+                if len(matched) >= limit:
+                    break
+            return {"success": True, "message": "맞춤 조회 성공", "data": {"articles": matched, "count": len(matched)}}
+        except Exception as e:
+            return {"success": False, "message": f"맞춤 조회 오류: {str(e)}"}
+
 
 # 뉴스 서비스 인스턴스 생성
 news_service = NewsService()
