@@ -439,7 +439,8 @@ class NewsService:
                 "data": {
                     "query": query,
                     "mode": "ai_structured" if ai_used else "fallback_keyword",
-                    "ai": {"used": ai_used, "fallback_reason": None if ai_used else reason,
+                    "ai": {"used": ai_used, "cached": reason == "cache",
+                           "fallback_reason": None if ai_used else reason,
                            "briefing_requested": include_briefing, "briefing_reason": brief_reason,
                            "latency_ms": latency_ms},
                     "parsed": parsed,

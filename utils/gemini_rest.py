@@ -4,8 +4,17 @@
 import os
 import json
 import httpx
+from utils.ttl_cache import TTLCache
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+# 동일 질의 재호출을 막아 무료 쿼터 절약. parse는 의미가 안 변하니 장기, briefing은 단기.
+_PARSE_CACHE = TTLCache(maxsize=512, ttl=43200)   # 12h
+_BRIEF_CACHE = TTLCache(maxsize=256, ttl=1800)    # 30m
+
+
+def _norm(q):
+    return " ".join((q or "").lower().split())
 
 
 def _model():
@@ -71,7 +80,11 @@ _PARSE_PROMPT = """다음 한국어 검색 질의를 정치뉴스 검색용 JSON
 
 
 async def parse_query(q: str):
-    """자연어 질의 → 구조화 dict. 실패 시 (None, reason)."""
+    """자연어 질의 → 구조화 dict. 실패 시 (None, reason). 캐시 히트 시 reason='cache'."""
+    ckey = _norm(q)
+    cached = _PARSE_CACHE.get(ckey)
+    if cached is not None:
+        return cached, "cache"
     text, reason = await _generate(_PARSE_PROMPT.format(q=q.replace('"', "'")), json_mode=True, timeout=6.0)
     if text is None:
         return None, reason
@@ -87,13 +100,15 @@ async def parse_query(q: str):
     preset = obj.get("date_preset")
     if isinstance(preset, str) and preset.lower() in ("null", "none", ""):
         preset = None
-    return {
+    result = {
         "keywords": _as_list(obj.get("keywords")),
         "category": cat,
         "entities": _as_list(obj.get("entities")),
         "parties": _as_list(obj.get("parties")),
         "date_preset": preset,
-    }, None
+    }
+    _PARSE_CACHE.set(ckey, result)
+    return result, None
 
 
 def _briefing_prompt(q, articles):
@@ -115,6 +130,13 @@ async def synthesize_briefing(q: str, articles: list):
     if not articles:
         return None, "no_articles"
     top = articles[:5]
+    # 캐시 키: 질의 + 상위 기사 시그니처(순서 보존 + 갱신시각 — 순서/내용 변하면 새로 생성, codex)
+    def _sig(a):
+        return f"{a.get('id')}@{a.get('updated_at') or a.get('published_at') or ''}"
+    ckey = _norm(q) + "|" + "|".join(_sig(a) for a in top if a.get("id"))
+    cached = _BRIEF_CACHE.get(ckey)
+    if cached is not None:
+        return cached, "cache"
     valid_ids = {str(a.get("id")) for a in top if a.get("id")}
     text, reason = await _generate(_briefing_prompt(q, top), json_mode=True, timeout=12.0)
     if text is None:
@@ -124,8 +146,12 @@ async def synthesize_briefing(q: str, articles: list):
         return None, "parse_json_fail"
     # citations는 실제 제공한 기사 id로만 제한(환각 인용 차단 — codex)
     citations = [str(c) for c in (obj.get("citations") or []) if str(c) in valid_ids]
-    return {
-        "answer": str(obj.get("answer") or "").strip(),
+    answer = str(obj.get("answer") or "").strip()
+    result = {
+        "answer": answer,
         "citations": citations,
         "confidence": obj.get("confidence") if obj.get("confidence") in ("high", "medium", "low") else "low",
-    }, None
+    }
+    if answer:  # 빈 답변은 캐시하지 않음(codex)
+        _BRIEF_CACHE.set(ckey, result)
+    return result, None
