@@ -1,5 +1,8 @@
 import asyncio
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
 import os
 import re
 import json
@@ -12,9 +15,13 @@ from utils.ai_parsing import extract_json_block
 
 class AISummaryService:
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        self.model = genai.GenerativeModel(self.model_name)
+        if genai is not None:
+            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            self.model = genai.GenerativeModel(self.model_name)
+        else:
+            self.model_name = None
+            self.model = None
     
     async def summarize_by_category(self, category, title, summary, max_retries=3):
         last = {"success": False, "message": "요약 실패"}
@@ -125,6 +132,8 @@ class AISummaryService:
     # ===== AI 호출 메소드 =====
     async def summarize_by_category2(self, category: str, title: str, content: str):
         try:
+            if self.model is None:
+                return {"success": False, "message": "AI 비활성(google-generativeai 미설치)"}
             prompt = self._build_prompt(category, title, content)
 
             # Gemini API 호출 (비동기)
@@ -153,6 +162,8 @@ class AISummaryService:
     async def _generate_comprehensive_summary(self, categorized_articles: Dict[str, List[Dict[str, Any]]]) -> str:
         """카테고리별 기사 제목으로 하루 종합 요약 생성 (Gemini)."""
         try:
+            if self.model is None:
+                return "AI 비활성(google-generativeai 미설치)"
             category_summaries = []
             for category, articles in categorized_articles.items():
                 if articles:

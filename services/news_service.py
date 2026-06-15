@@ -1,5 +1,8 @@
 from datetime import datetime
-import feedparser
+try:
+    import feedparser
+except ImportError:
+    feedparser = None
 import time
 from typing import List, Dict, Any, Optional
 from firebase.firebase_config import db
@@ -150,6 +153,8 @@ class NewsService:
 
     async def collect_news_from_rss(self, category: str = None) -> Dict[str, Any]:
         try:
+            if feedparser is None:
+                return {"success": False, "message": "수집 비활성(feedparser 미설치). 수집은 GitHub Actions에서 실행."}
             collected_articles = []
             collected_presidents = []
             collected_parliamentary = []

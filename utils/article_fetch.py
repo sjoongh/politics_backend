@@ -1,12 +1,12 @@
-"""기사 본문 크롤링 유틸 (trafilatura 기반)."""
-import trafilatura
+"""기사 본문 크롤링 유틸 (trafilatura 기반, 옵셔널)."""
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
 
 
 def fetch_article_text(url: str, min_len: int = 200) -> str:
-    """기사 URL에서 본문 텍스트를 추출. 실패하거나 너무 짧으면 빈 문자열 반환.
-    (네트워크 호출이므로 async 컨텍스트에서는 asyncio.to_thread로 감쌀 것)
-    """
-    if not url:
+    if not url or trafilatura is None:
         return ""
     try:
         downloaded = trafilatura.fetch_url(url)
