@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# 로컬 실행 서버
+uvicorn[standard]>=0.24.0
+
+# 수집/AI 전용 (Vercel 배포에서는 제외 — 용량/서버리스)
+google-generativeai>=0.8.3
+openai>=1.3.5
+feedparser>=6.0.11
+beautifulsoup4>=4.12.0
+trafilatura>=1.8.0
+schedule>=1.2.0

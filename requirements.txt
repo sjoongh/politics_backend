@@ -1,40 +1,13 @@
-# FastAPI 서버
+# API 런타임(슬림) — Vercel 배포용. 수집 라이브러리는 requirements-collect.txt
 fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-
-# Firebase & Google
 firebase-admin>=6.8.0
 google-cloud-firestore>=2.16.0
-google-cloud-storage>=2.14.0
-google-generativeai>=0.8.3
-
-# AI (OpenAI API 포함)
-openai>=1.3.5
-
-# 데이터 파싱 & 웹 요청
-feedparser>=6.0.11
 requests>=2.31.0
-beautifulsoup4>=4.12.0
-trafilatura>=1.8.0
 httpx>=0.27.0
-
-# 환경 변수
 python-dotenv>=1.0.0
-
-# 스케줄러
-schedule>=1.2.0
-
-# 보안 및 인증
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
-# bcrypt는 4.1+에서 passlib 1.7.4 백엔드 감지가 깨짐(>72byte ValueError) → 4.0.x로 고정
 bcrypt==4.0.1
-
-# Pydantic (이메일 검증 포함)
 pydantic[email]>=2.8.2
-
-# 파일 업로드
 python-multipart>=0.0.6
-
-# 날짜 처리
 python-dateutil>=2.9.0.post0
