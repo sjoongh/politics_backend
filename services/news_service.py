@@ -16,6 +16,9 @@ import requests
 from utils.collect_config import ai_throttle_seconds
 from utils.article_fetch import fetch_article_text
 from utils.digest import matches_interests
+from utils.gemini_rest import parse_query, synthesize_briefing
+from utils.search_rank import rank_articles
+from utils.personalize import build_profile, pick_reason, diversify
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
 
@@ -400,8 +403,125 @@ class NewsService:
         except Exception as e:
             return {"success": False, "message": f"기사 조회 중 오류가 발생했습니다: {str(e)}"}
 
-    async def search_articles(self, 
-                             query: str, 
+    async def ai_search(self, query: str, include_briefing: bool = False,
+                        limit: int = 20, candidate_pool: int = 300) -> Dict[str, Any]:
+        """자연어 검색: Gemini로 질의 구조화 → 후보 기사 랭킹 → (옵션)브리핑.
+        Gemini가 없거나 실패하면 부분문자열 폴백으로 동작(앱이 깨지지 않음)."""
+        import time as _time
+        from datetime import datetime, timezone
+        t0 = _time.monotonic()
+        try:
+            # 1) 후보 기사 로드(최근순). Firestore stream은 동기 I/O라 스레드로 오프로드.
+            def _load():
+                docs = (db.collection("articles")
+                        .order_by("published_at", direction=firestore.Query.DESCENDING)
+                        .limit(candidate_pool).stream())
+                return [doc.to_dict() for doc in docs]
+            candidates = await asyncio.to_thread(_load)
+
+            # 2) Gemini 질의 구조화(실패 시 폴백)
+            parsed, reason = await parse_query(query)
+            ai_used = parsed is not None
+
+            # 3) 랭킹
+            ranked = rank_articles(candidates, parsed, query, limit=limit,
+                                   now=datetime.now(timezone.utc))
+
+            # 4) 옵션 브리핑(상위 결과 기반)
+            briefing = None
+            brief_reason = None
+            if include_briefing and ranked:
+                briefing, brief_reason = await synthesize_briefing(query, ranked)
+
+            latency_ms = int((_time.monotonic() - t0) * 1000)
+            return {
+                "success": True,
+                "message": "AI 검색 성공",
+                "data": {
+                    "query": query,
+                    "mode": "ai_structured" if ai_used else "fallback_keyword",
+                    "ai": {"used": ai_used, "cached": reason == "cache",
+                           "fallback_reason": None if ai_used else reason,
+                           "briefing_requested": include_briefing, "briefing_reason": brief_reason,
+                           "latency_ms": latency_ms},
+                    "parsed": parsed,
+                    "items": ranked,
+                    "count": len(ranked),
+                    "briefing": briefing,
+                },
+            }
+        except Exception as e:
+            print(f"[ai_search] error: {e!r}")  # 상세는 로그로만
+            return {"success": False, "message": "AI 검색 중 오류가 발생했습니다."}
+
+    async def personalized_feed(self, user_id: str, interests, limit: int = 30,
+                                candidate_pool: int = 300) -> Dict[str, Any]:
+        """개인 맞춤 'For You' 피드. 순수 랭킹(Gemini 미사용) + 다양성 강제 + 추천 사유.
+        관심사·북마크가 모두 없으면 '시작 추천'(최신+다양성) 모드로 정직하게 처리."""
+        from datetime import datetime, timezone
+        try:
+            def _load_recent():
+                docs = (db.collection("articles")
+                        .order_by("published_at", direction=firestore.Query.DESCENDING)
+                        .limit(candidate_pool).stream())
+                return [doc.to_dict() for doc in docs]
+
+            def _load_bookmark_articles():
+                if not user_id:
+                    return []
+                try:
+                    # order_by 없이 단일 필터(복합 인덱스 회피). 키워드 추출엔 순서 불필요.
+                    bms = (db.collection("bookmarks")
+                           .where("user_id", "==", user_id).limit(30).stream())
+                    ids = [bm.to_dict().get("article_id") for bm in bms]
+                    refs = [db.collection("articles").document(a) for a in ids if a]
+                    if not refs:
+                        return []
+                    # 배치 조회(개별 get N회 → 1회 get_all)
+                    return [d.to_dict() for d in db.get_all(refs) if d.exists]
+                except Exception as be:  # 북마크 조회 실패해도 관심사만으로 개인화 지속
+                    print(f"[personalized_feed] bookmark load skipped: {be!r}")
+                    return []
+
+            candidates = await asyncio.to_thread(_load_recent)
+            bookmark_articles = await asyncio.to_thread(_load_bookmark_articles)
+
+            parsed, explicit, implicit = build_profile(interests, bookmark_articles)
+            has_profile = bool(parsed["keywords"])
+
+            ranked = []
+            if has_profile:
+                ranked = rank_articles(candidates, parsed, query="", limit=candidate_pool,
+                                       now=datetime.now(timezone.utc))
+                ranked = diversify(ranked, limit=limit)
+                for it in ranked:
+                    it["reason"] = pick_reason(it, explicit, implicit)
+
+            if ranked:
+                mode = "personalized"
+            else:
+                # 콜드스타트 또는 관심사 매칭 0건 → '맞춤' 아닌 '시작 추천'으로 정직하게(codex)
+                mode = "no_match" if has_profile else "starter"
+                ranked = diversify(list(candidates), limit=limit)
+                for it in ranked:
+                    it["reason"] = "지금 주목받는 정치뉴스"
+
+            return {
+                "success": True,
+                "message": "맞춤 피드 조회 성공",
+                "data": {
+                    "mode": mode,
+                    "profile": {"explicit": explicit, "implicit": implicit},
+                    "items": ranked,
+                    "count": len(ranked),
+                },
+            }
+        except Exception as e:
+            print(f"[personalized_feed] error: {e!r}")
+            return {"success": False, "message": "맞춤 피드 조회 중 오류가 발생했습니다."}
+
+    async def search_articles(self,
+                             query: str,
                              category: Optional[str] = None,
                              limit: int = 20) -> Dict[str, Any]:
         """기사 검색"""

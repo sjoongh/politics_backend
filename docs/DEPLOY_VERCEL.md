@@ -9,7 +9,8 @@ FIREBASE_TYPE, FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY_ID, FIREBASE_PRIVATE_KE
 FIREBASE_CLIENT_EMAIL, FIREBASE_CLIENT_ID, FIREBASE_AUTH_URI, FIREBASE_TOKEN_URI,
 FIREBASE_AUTH_PROVIDER_X509_CERT_URL, FIREBASE_CLIENT_X509_CERT_URL,
 ADMIN_KEY, ASSEMBLY_API_KEY, SECRET_KEY  (값은 politics_backend/.env 참고)
-(GOOGLE_API_KEY는 수집이 GitHub Actions라 Vercel엔 불필요)
+GOOGLE_API_KEY  ← **AI 자연어 검색(/api/news/search/ai)이 런타임에 Gemini를 직접 호출하므로 필수.**
+  없으면 검색은 항상 `fallback_keyword`(부분문자열) 모드로만 동작한다. (선택: GEMINI_MODEL, 기본 gemini-2.5-flash)
 
 ## 3. 배포 & 검증
 Deploy → `https://<project>.vercel.app/health` → 200
