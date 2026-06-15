@@ -16,6 +16,8 @@ import requests
 from utils.collect_config import ai_throttle_seconds
 from utils.article_fetch import fetch_article_text
 from utils.digest import matches_interests
+from utils.gemini_rest import parse_query, synthesize_briefing
+from utils.search_rank import rank_articles
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
 
@@ -400,8 +402,58 @@ class NewsService:
         except Exception as e:
             return {"success": False, "message": f"기사 조회 중 오류가 발생했습니다: {str(e)}"}
 
-    async def search_articles(self, 
-                             query: str, 
+    async def ai_search(self, query: str, include_briefing: bool = False,
+                        limit: int = 20, candidate_pool: int = 300) -> Dict[str, Any]:
+        """자연어 검색: Gemini로 질의 구조화 → 후보 기사 랭킹 → (옵션)브리핑.
+        Gemini가 없거나 실패하면 부분문자열 폴백으로 동작(앱이 깨지지 않음)."""
+        import time as _time
+        from datetime import datetime, timezone
+        t0 = _time.monotonic()
+        try:
+            # 1) 후보 기사 로드(최근순). Firestore stream은 동기 I/O라 스레드로 오프로드.
+            def _load():
+                docs = (db.collection("articles")
+                        .order_by("published_at", direction=firestore.Query.DESCENDING)
+                        .limit(candidate_pool).stream())
+                return [doc.to_dict() for doc in docs]
+            candidates = await asyncio.to_thread(_load)
+
+            # 2) Gemini 질의 구조화(실패 시 폴백)
+            parsed, reason = await parse_query(query)
+            ai_used = parsed is not None
+
+            # 3) 랭킹
+            ranked = rank_articles(candidates, parsed, query, limit=limit,
+                                   now=datetime.now(timezone.utc))
+
+            # 4) 옵션 브리핑(상위 결과 기반)
+            briefing = None
+            brief_reason = None
+            if include_briefing and ranked:
+                briefing, brief_reason = await synthesize_briefing(query, ranked)
+
+            latency_ms = int((_time.monotonic() - t0) * 1000)
+            return {
+                "success": True,
+                "message": "AI 검색 성공",
+                "data": {
+                    "query": query,
+                    "mode": "ai_structured" if ai_used else "fallback_keyword",
+                    "ai": {"used": ai_used, "fallback_reason": None if ai_used else reason,
+                           "briefing_requested": include_briefing, "briefing_reason": brief_reason,
+                           "latency_ms": latency_ms},
+                    "parsed": parsed,
+                    "items": ranked,
+                    "count": len(ranked),
+                    "briefing": briefing,
+                },
+            }
+        except Exception as e:
+            print(f"[ai_search] error: {e!r}")  # 상세는 로그로만
+            return {"success": False, "message": "AI 검색 중 오류가 발생했습니다."}
+
+    async def search_articles(self,
+                             query: str,
                              category: Optional[str] = None,
                              limit: int = 20) -> Dict[str, Any]:
         """기사 검색"""

@@ -190,3 +190,4 @@ firebase-adminsdk.json
 serviceAccount*.json
 *serviceaccount*.json
 .omc/
+.vercel
