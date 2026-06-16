@@ -41,8 +41,16 @@ class IssueService:
             query = query.where("status", "==", status)
         if category:
             query = query.where("category", "==", category)
-        query = query.limit(limit).offset(offset)
-        items = [to_summary({**doc.to_dict(), "id": doc.id}) for doc in query.stream()]
+        # 사건성 점수 내림차순 정렬(수동 이슈는 미설정 → 상위 유지). 혼재 필드라 파이썬 정렬.
+        docs = [{**doc.to_dict(), "id": doc.id} for doc in query.limit(200).stream()]
+
+        def _rank(d):
+            # 수동(사람 큐레이션) 이슈는 최상단, 자동은 newsworthiness 순
+            nw = d.get("newsworthiness")
+            base = 1000 if not d.get("auto_generated") else (nw if nw is not None else 0)
+            return (base, str(d.get("updated_at") or ""))
+        docs.sort(key=_rank, reverse=True)
+        items = [to_summary(d) for d in docs[offset:offset + limit]]
         return {"success": True, "message": "이슈 목록 조회 성공", "data": items}
 
     @staticmethod
