@@ -92,4 +92,35 @@ class SourceIngestService:
             return {"success": False, "message": "표결 수집 실패"}
 
 
+    async def enrich_pending(self, limit: int = 20) -> dict:
+        """요약이 비어있는 소스를 AI로 보강(요청경로 아닌 수집 배치). throttle 준수, 실패는 skip."""
+        import asyncio
+        from utils.gemini_rest import enrich_source
+        from utils.collect_config import ai_throttle_seconds
+        try:
+            throttle = ai_throttle_seconds()
+            done = 0
+            # type별로 최근 항목을 받아 summary 비어있는 것만 보강(None-쿼리 회피 위해 파이썬 필터)
+            docs = db.collection("source_items").limit(200).stream()
+            targets = [d for d in docs if not (d.to_dict().get("summary"))][:limit]
+            for d in targets:
+                s = d.to_dict()
+                enriched, reason = await enrich_source(s.get("title"), s.get("title"))
+                if enriched and enriched.get("summary"):
+                    d.reference.update({
+                        "summary": enriched["summary"],
+                        "claim_summary": enriched.get("claim_summary"),
+                        # 구조화 소스(법안 발의 등)는 기존 position 보존
+                        "position": enriched.get("position") or s.get("position"),
+                        "updated_at": _now(),
+                    })
+                    done += 1
+                if throttle:
+                    await asyncio.sleep(throttle)
+            return {"success": True, "message": "AI 보강", "data": {"enriched": done, "scanned": len(targets)}}
+        except Exception as e:
+            print(f"[enrich_pending] {e!r}")
+            return {"success": False, "message": "AI 보강 실패"}
+
+
 source_ingest_service = SourceIngestService()
