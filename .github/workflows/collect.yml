@@ -59,5 +59,6 @@ jobs:
               print(await ing.enrich_pending())
               print(await cluster.generate_bill_issues())
               print(await link.link_unlinked())
+              print(await link.crosslink())
           asyncio.run(main())
           PY
