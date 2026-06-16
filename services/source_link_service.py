@@ -76,16 +76,14 @@ class SourceLinkService:
 
             news_linked = gov_linked = 0
             for iss in issues:
+                # 매칭어: 법률명/키워드 중 길이 3+ 만(짧은 일반어 오연결 방지 — codex).
+                # 제목 첫단어 휴리스틱은 '국민/정부' 등 대량 오연결 위험이라 제거.
                 terms = set()
                 if iss.get("law_name") and len(iss["law_name"]) >= 3:
                     terms.add(iss["law_name"])
                 for k in (iss.get("keywords") or []):
-                    if k and len(k) >= 2:
+                    if k and len(k) >= 3:
                         terms.add(k)
-                # 제목에서 '처리/논란' 등 접미 제거한 핵심어
-                title = (iss.get("title") or "")
-                if len(title) >= 3:
-                    terms.add(title.split()[0])
                 if not terms:
                     continue
                 bills = set((iss.get("entities") or {}).get("bills") or [])
@@ -94,9 +92,10 @@ class SourceLinkService:
                 existing = set(iss.get("article_ids") or [])
                 add_ids = []
                 for a in arts:
+                    aid = a.get("id")
                     blob = (a.get("title", "") + " " + a.get("ai_summary", ""))
-                    if a.get("id") not in existing and any(t in blob for t in terms):
-                        add_ids.append(a["id"])
+                    if aid and aid not in existing and any(t in blob for t in terms):
+                        add_ids.append(aid)
                     if len(add_ids) >= 12:
                         break
                 if add_ids:
@@ -104,14 +103,17 @@ class SourceLinkService:
                         {"article_ids": list(existing | set(add_ids)), "updated_at": _now()})
                     news_linked += len(add_ids)
 
-                # 정부 소스 매칭 → issue 연결
+                # 정부 소스 매칭 → issue 연결. 의안번호 일치=강함, 법률명(4+) 등장=보조.
+                # 한 번 연결된 gov는 로컬 상태도 갱신해 다른 이슈가 덮어쓰지 않게(codex).
+                law = iss.get("law_name") or ""
                 for g in govs:
-                    if g.get("link_status") in ("auto", "confirmed"):
+                    if g.get("link_status") in ("auto", "confirmed", "rejected"):
                         continue
                     g_bills = set((g.get("entities") or {}).get("bills") or [])
                     gtitle = g.get("title", "")
-                    if (bills & g_bills) or any(t in gtitle for t in terms):
+                    if (bills & g_bills) or (len(law) >= 4 and law in gtitle):
                         g["_ref"].update({"issue_id": iss["id"], "link_status": "auto", "updated_at": _now()})
+                        g["link_status"] = "auto"
                         gov_linked += 1
             return {"success": True, "message": "교차연결", "data": {"news": news_linked, "gov": gov_linked}}
         except Exception as e:

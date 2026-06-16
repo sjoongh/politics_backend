@@ -35,6 +35,15 @@ class IssueClusterService:
                         db.collection("source_items").where("type", "==", t).limit(scan).stream()]
             clusters = cluster_by_bill(src)
 
+            # 기사 후보(법률명 매칭)로 생성 시점에도 뉴스 점수 반영(영구 보류 방지 — codex)
+            arts = [d.to_dict() for d in db.collection("articles").limit(300).stream()]
+
+            def _article_count(law_name):
+                if not law_name or len(law_name) < 3:
+                    return 0
+                return sum(1 for a in arts
+                           if law_name in (a.get("title", "") + " " + a.get("ai_summary", "")))
+
             created = updated = linked = skipped = 0
             for c in clusters:
                 cbid = c["canonical_id"]
@@ -56,7 +65,8 @@ class IssueClusterService:
 
                 if issue_id is None:
                     # 자동 이슈: 사건성 게이트(절차적 대안법안 도배 방지 — codex)
-                    score = issue_score({"procedural": procedural}, items, article_count=0)
+                    score = issue_score({"procedural": procedural}, items,
+                                        article_count=_article_count(law_name))
                     ref = db.collection("issues").document(f"issue_bill_{cbid}")
                     exists = ref.get().exists
                     if score < PROMOTE:
@@ -94,9 +104,11 @@ class IssueClusterService:
                         ref.set(doc)
                         created += 1
 
-                # 클러스터 소스들을 이슈에 연결
-                for sid in c["item_ids"]:
-                    db.collection("source_items").document(sid).update(
+                # 클러스터 소스들을 이슈에 연결(관리자 confirmed/rejected는 보존)
+                for s in items:
+                    if s.get("link_status") in ("confirmed", "rejected"):
+                        continue
+                    db.collection("source_items").document(s["id"]).update(
                         {"issue_id": issue_id, "link_status": "auto", "updated_at": _now()})
                     linked += 1
 
