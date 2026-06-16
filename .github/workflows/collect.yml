@@ -1,7 +1,7 @@
 name: News Collect
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 * * * *"   # 매시(정치뉴스 속보성 위해 하루1회→시간별)
   workflow_dispatch: {}
 jobs:
   collect:
@@ -25,6 +25,37 @@ jobs:
           FIREBASE_AUTH_PROVIDER_X509_CERT_URL: ${{ secrets.FIREBASE_AUTH_PROVIDER_X509_CERT_URL }}
           FIREBASE_CLIENT_X509_CERT_URL: ${{ secrets.FIREBASE_CLIENT_X509_CERT_URL }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+          ASSEMBLY_AGE: "22"
           AI_THROTTLE_SEC: "2"
         run: |
           python -c "import asyncio; from services.news_service import news_service; print(asyncio.run(news_service.collect_news_from_rss()).get('message'))"
+      - name: Ingest primary sources (gov + assembly) + enrich + link
+        env:
+          FIREBASE_TYPE: ${{ secrets.FIREBASE_TYPE }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_PRIVATE_KEY_ID: ${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
+          FIREBASE_AUTH_URI: ${{ secrets.FIREBASE_AUTH_URI }}
+          FIREBASE_TOKEN_URI: ${{ secrets.FIREBASE_TOKEN_URI }}
+          FIREBASE_AUTH_PROVIDER_X509_CERT_URL: ${{ secrets.FIREBASE_AUTH_PROVIDER_X509_CERT_URL }}
+          FIREBASE_CLIENT_X509_CERT_URL: ${{ secrets.FIREBASE_CLIENT_X509_CERT_URL }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+          ASSEMBLY_AGE: "22"
+          AI_THROTTLE_SEC: "2"
+        run: |
+          python - <<'PY'
+          import asyncio
+          from services.source_ingest_service import source_ingest_service as ing
+          from services.source_link_service import source_link_service as link
+          async def main():
+              print(await ing.ingest_gov_policy())
+              print(await ing.ingest_assembly_bills())
+              print(await ing.ingest_assembly_votes())
+              print(await ing.enrich_pending())
+              print(await link.link_unlinked())
+          asyncio.run(main())
+          PY

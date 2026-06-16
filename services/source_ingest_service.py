@@ -1,0 +1,139 @@
+"""1차 소스 수집(정부/국회) → source_items 컬렉션 정규화 저장.
+
+저작권 안전: 원문 전문 저장 안 함. 제목 + (AI)요약 + 원문 링크 + 출처표기만.
+AI 보강은 Task 5에서 수집 후 배치로 채운다.
+"""
+import os
+from datetime import datetime, timezone
+import xml.etree.ElementTree as ET
+import httpx
+
+from google.cloud import firestore
+from firebase.firebase_config import db
+from utils.source_item import normalize_gov_policy, normalize_bill, normalize_vote
+
+KOREA_RSS = "https://www.korea.kr/rss/policy.xml"
+ASSEMBLY_AGE = os.getenv("ASSEMBLY_AGE", "22")
+
+
+def _parse_rss(xml_bytes):
+    root = ET.fromstring(xml_bytes)
+    out = []
+    for it in root.findall(".//item"):
+        d = {}
+        for ch in it:
+            d[ch.tag.split("}")[-1]] = (ch.text or "")
+        out.append(d)
+    return out
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _save_new(source):
+    """원자적 create()로 저장(이미 존재하면 AlreadyExists → skip). 신규 1, 기존 0."""
+    from google.api_core import exceptions as gexc
+    ref = db.collection("source_items").document(source["id"])
+    source["created_at"] = _now()
+    source["updated_at"] = source["created_at"]
+    try:
+        ref.create(source)   # 동시 ingest에도 원자적 — 중복/경합 방지(codex)
+        return 1
+    except gexc.AlreadyExists:
+        return 0
+
+
+class SourceIngestService:
+    async def ingest_gov_policy(self, limit: int = 50) -> dict:
+        """정책브리핑 korea.kr RSS 수집."""
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(KOREA_RSS)
+            r.raise_for_status()                 # 4xx/5xx HTML을 XML로 오파싱 방지(codex)
+            items = _parse_rss(r.content)[:limit]
+            new = failed = 0
+            for it in items:                     # per-item skip(한 건 실패가 전체로 번지지 않게)
+                try:
+                    new += _save_new(normalize_gov_policy(it))
+                except Exception as ie:
+                    failed += 1
+                    print(f"[ingest_gov_policy] item skip: {ie!r}")
+            return {"success": True, "message": "정부 소스 수집",
+                    "data": {"new": new, "failed": failed, "total": len(items)}}
+        except Exception as e:
+            print(f"[ingest_gov_policy] {e!r}")
+            return {"success": False, "message": "정부 소스 수집 실패"}
+
+    async def ingest_assembly_bills(self, max_pages: int = 3) -> dict:
+        """열린국회 법안(nzmimeepazxkubdpn, AGE) → assembly_bill 정규화 저장."""
+        try:
+            from services.assembly_client import fetch_rows
+            bills = []
+            for i in range(1, max_pages + 1):
+                page = fetch_rows("nzmimeepazxkubdpn", {"AGE": ASSEMBLY_AGE}, p_index=i, p_size=100)
+                if not page:
+                    break
+                bills.extend(page)
+            new = sum(_save_new(normalize_bill(b)) for b in bills)
+            return {"success": True, "message": "법안 수집", "data": {"new": new, "total": len(bills)}}
+        except Exception as e:
+            print(f"[ingest_assembly_bills] {e!r}")
+            return {"success": False, "message": "법안 수집 실패"}
+
+    async def ingest_assembly_votes(self, num_bills: int = 10) -> dict:
+        """최근 처리 안건의 표결(nojepdqqaweusdfbi) → assembly_vote 정규화 저장."""
+        try:
+            from services.assembly_client import fetch_rows, fetch_all
+            bills = fetch_rows("ncocpgfiaoituanbr", {"AGE": ASSEMBLY_AGE}, p_index=1, p_size=num_bills)
+            new = 0
+            for b in bills:
+                bid = b.get("BILL_ID")
+                if not bid:
+                    continue
+                rows = fetch_all("nojepdqqaweusdfbi", {"AGE": ASSEMBLY_AGE, "BILL_ID": bid},
+                                 p_size=300, max_pages=2)
+                agg = normalize_vote(b, rows)
+                if agg:
+                    new += _save_new(agg)
+            return {"success": True, "message": "표결 수집", "data": {"new": new, "bills": len(bills)}}
+        except Exception as e:
+            print(f"[ingest_assembly_votes] {e!r}")
+            return {"success": False, "message": "표결 수집 실패"}
+
+
+    async def enrich_pending(self, limit: int = 20) -> dict:
+        """요약이 비어있는 소스를 AI로 보강(요청경로 아닌 수집 배치). throttle 준수, 실패는 skip."""
+        import asyncio
+        from utils.gemini_rest import enrich_source
+        from utils.collect_config import ai_throttle_seconds
+        try:
+            throttle = ai_throttle_seconds()
+            done = 0
+            # 최신 항목 우선(오래된 실패건이 신규를 굶기지 않게 — codex). summary 비어있는 것만.
+            docs = (db.collection("source_items")
+                    .order_by("created_at", direction=firestore.Query.DESCENDING)
+                    .limit(200).stream())
+            targets = [d for d in docs if not (d.to_dict().get("summary"))][:limit]
+            for d in targets:
+                s = d.to_dict()
+                # 정부자료는 발췌(excerpt) 사용, 없으면 제목 — 본문 근거로 요약 품질↑
+                enriched, reason = await enrich_source(s.get("title"), s.get("excerpt") or s.get("title"))
+                if enriched and enriched.get("summary"):
+                    d.reference.update({
+                        "summary": enriched["summary"],
+                        "claim_summary": enriched.get("claim_summary"),
+                        # 구조화 소스(법안 발의 등)는 기존 position 보존
+                        "position": enriched.get("position") or s.get("position"),
+                        "updated_at": _now(),
+                    })
+                    done += 1
+                if throttle:
+                    await asyncio.sleep(throttle)
+            return {"success": True, "message": "AI 보강", "data": {"enriched": done, "scanned": len(targets)}}
+        except Exception as e:
+            print(f"[enrich_pending] {e!r}")
+            return {"success": False, "message": "AI 보강 실패"}
+
+
+source_ingest_service = SourceIngestService()
