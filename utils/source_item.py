@@ -85,3 +85,50 @@ def normalize_bill(bill):
         "issue_id": None,
         "link_status": "new",
     }
+
+
+_VOTE_YES = ("찬성",)
+_VOTE_NO = ("반대",)
+_VOTE_ABS = ("기권",)
+
+
+def normalize_vote(bill, vote_rows):
+    """열린국회 표결 원자료(의원별 행 리스트) → assembly_vote source_item(집계)."""
+    bill_id = str(bill.get("BILL_ID") or "")
+    name = bill.get("BILL_NAME") or ""
+    url = bill.get("BILL_URL") or bill.get("DETAIL_LINK") or (
+        f"https://likms.assembly.go.kr/bill/billDetail.do?billId={bill_id}" if bill_id else "")
+    yes = no = abstain = 0
+    party = {}
+    for v in (vote_rows or []):
+        res = v.get("RESULT_VOTE_MOD") or v.get("VOTE_RESULT") or ""
+        poly = v.get("POLY_NM") or "무소속"
+        if any(k in res for k in _VOTE_YES):
+            yes += 1
+            party.setdefault(poly, {"yes": 0, "no": 0, "abstain": 0})["yes"] += 1
+        elif any(k in res for k in _VOTE_NO):
+            no += 1
+            party.setdefault(poly, {"yes": 0, "no": 0, "abstain": 0})["no"] += 1
+        elif any(k in res for k in _VOTE_ABS):
+            abstain += 1
+            party.setdefault(poly, {"yes": 0, "no": 0, "abstain": 0})["abstain"] += 1
+    result = bill.get("PROC_RESULT") or ("가결" if yes > no else "부결" if no > yes else "")
+    return {
+        "id": make_source_id("assembly_vote", url + "#vote"),
+        "type": "assembly_vote",
+        "actor_type": "assembly",
+        "actor_name": "국회 본회의",
+        "title": f"표결: {name}",
+        "summary": None,
+        "claim_summary": None,
+        "position": None,
+        "source_bias": "official",
+        "url": url,
+        "published_at": bill.get("PROC_DT") or bill.get("VOTE_DATE") or "",
+        "entities": {"people": [], "parties": list(party.keys()), "bills": [bill_id] if bill_id else []},
+        "bill": None,
+        "vote": {"bill_id": bill_id, "result": result, "yes": yes, "no": no,
+                 "abstain": abstain, "party_breakdown": party},
+        "issue_id": None,
+        "link_status": "new",
+    }

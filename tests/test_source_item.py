@@ -1,5 +1,5 @@
 from utils.source_item import (
-    make_source_id, strip_html, extract_entities, normalize_gov_policy, normalize_bill,
+    make_source_id, strip_html, extract_entities, normalize_gov_policy, normalize_bill, normalize_vote,
 )
 
 
@@ -40,3 +40,18 @@ def test_normalize_bill():
     assert s["bill"]["bill_id"] == "PRC_X1"
     assert "PRC_X1" in s["entities"]["bills"]
     assert s["position"] == "propose"
+
+
+def test_normalize_vote_aggregates():
+    bill = {"BILL_ID": "B1", "BILL_NAME": "노란봉투법", "PROC_DT": "2026-06-10"}
+    rows = [
+        {"RESULT_VOTE_MOD": "찬성", "POLY_NM": "더불어민주당"},
+        {"RESULT_VOTE_MOD": "찬성", "POLY_NM": "더불어민주당"},
+        {"RESULT_VOTE_MOD": "반대", "POLY_NM": "국민의힘"},
+        {"RESULT_VOTE_MOD": "기권", "POLY_NM": "국민의힘"},
+    ]
+    s = normalize_vote(bill, rows)
+    assert s["type"] == "assembly_vote"
+    assert s["vote"]["yes"] == 2 and s["vote"]["no"] == 1 and s["vote"]["abstain"] == 1
+    assert s["vote"]["party_breakdown"]["더불어민주당"]["yes"] == 2
+    assert s["vote"]["result"] == "가결"  # yes > no

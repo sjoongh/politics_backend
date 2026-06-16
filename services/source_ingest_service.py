@@ -3,14 +3,16 @@
 저작권 안전: 원문 전문 저장 안 함. 제목 + (AI)요약 + 원문 링크 + 출처표기만.
 AI 보강은 Task 5에서 수집 후 배치로 채운다.
 """
+import os
 from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import httpx
 
 from firebase.firebase_config import db
-from utils.source_item import normalize_gov_policy, normalize_bill
+from utils.source_item import normalize_gov_policy, normalize_bill, normalize_vote
 
 KOREA_RSS = "https://www.korea.kr/rss/policy.xml"
+ASSEMBLY_AGE = os.getenv("ASSEMBLY_AGE", "22")
 
 
 def _parse_rss(xml_bytes):
@@ -53,15 +55,41 @@ class SourceIngestService:
             print(f"[ingest_gov_policy] {e!r}")
             return {"success": False, "message": "정부 소스 수집 실패"}
 
-    async def ingest_assembly_bills(self, bills) -> dict:
-        """열린국회 법안 리스트(dict) → assembly_bill 정규화 저장.
-        호출부에서 assembly_client로 조회한 원자료를 넘긴다."""
+    async def ingest_assembly_bills(self, max_pages: int = 3) -> dict:
+        """열린국회 법안(nzmimeepazxkubdpn, AGE) → assembly_bill 정규화 저장."""
         try:
-            new = sum(_save_new(normalize_bill(b)) for b in (bills or []))
-            return {"success": True, "message": "법안 수집", "data": {"new": new, "total": len(bills or [])}}
+            from services.assembly_client import fetch_rows
+            bills = []
+            for i in range(1, max_pages + 1):
+                page = fetch_rows("nzmimeepazxkubdpn", {"AGE": ASSEMBLY_AGE}, p_index=i, p_size=100)
+                if not page:
+                    break
+                bills.extend(page)
+            new = sum(_save_new(normalize_bill(b)) for b in bills)
+            return {"success": True, "message": "법안 수집", "data": {"new": new, "total": len(bills)}}
         except Exception as e:
             print(f"[ingest_assembly_bills] {e!r}")
             return {"success": False, "message": "법안 수집 실패"}
+
+    async def ingest_assembly_votes(self, num_bills: int = 10) -> dict:
+        """최근 처리 안건의 표결(nojepdqqaweusdfbi) → assembly_vote 정규화 저장."""
+        try:
+            from services.assembly_client import fetch_rows, fetch_all
+            bills = fetch_rows("ncocpgfiaoituanbr", {"AGE": ASSEMBLY_AGE}, p_index=1, p_size=num_bills)
+            new = 0
+            for b in bills:
+                bid = b.get("BILL_ID")
+                if not bid:
+                    continue
+                rows = fetch_all("nojepdqqaweusdfbi", {"AGE": ASSEMBLY_AGE, "BILL_ID": bid},
+                                 p_size=300, max_pages=2)
+                agg = normalize_vote(b, rows)
+                if agg:
+                    new += _save_new(agg)
+            return {"success": True, "message": "표결 수집", "data": {"new": new, "bills": len(bills)}}
+        except Exception as e:
+            print(f"[ingest_assembly_votes] {e!r}")
+            return {"success": False, "message": "표결 수집 실패"}
 
 
 source_ingest_service = SourceIngestService()
