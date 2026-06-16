@@ -53,10 +53,11 @@ def cluster_by_bill(source_items, min_types=2):
     by_bill = {}
     for s in source_items or []:
         bid = bill_id_of(s)
-        if not bid:
+        cbid = canonical_bill_id(bid)
+        if not cbid:            # 빈 식별자 제외(issue_bill_ 충돌 방지 — codex)
             continue
-        by_bill.setdefault(canonical_bill_id(bid), {"raw": bid, "items": []})
-        by_bill[canonical_bill_id(bid)]["items"].append(s)
+        by_bill.setdefault(cbid, {"raw": bid, "items": []})
+        by_bill[cbid]["items"].append(s)
 
     clusters = []
     for cbid, grp in by_bill.items():
@@ -72,6 +73,6 @@ def cluster_by_bill(source_items, min_types=2):
             "status": _pick_status(items),
             "types": sorted(types),
             "has_vote": has_vote,
-            "item_ids": [i["id"] for i in items],
+            "item_ids": [i.get("id") for i in items if i.get("id")],
         })
     return clusters

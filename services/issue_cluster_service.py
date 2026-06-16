@@ -7,7 +7,7 @@
 """
 from datetime import datetime, timezone
 from firebase.firebase_config import db
-from utils.bill_cluster import cluster_by_bill, canonical_bill_id
+from utils.bill_cluster import cluster_by_bill
 
 
 def _now():
@@ -40,14 +40,15 @@ class IssueClusterService:
                 items = [s for s in src if s.get("id") in set(c["item_ids"])]
                 bill_set = _cluster_bill_set(items) or [c["bill_id"]]
 
-                # 수동 이슈 충돌 검사(같은 법안의 사람 생성 이슈 우선)
+                # 수동 이슈 충돌 검사(같은 법안의 사람 생성 이슈 우선).
+                # limit 없이 전부 본 뒤 수동 이슈를 찾는다(자동 이슈가 먼저 잡혀 수동우선이 깨지는 것 방지 — codex).
                 issue_id = None
                 for b in bill_set:
-                    hit = list(db.collection("issues")
-                               .where("entities.bills", "array_contains", b).limit(1).stream())
-                    manual = next((h for h in hit if not h.to_dict().get("auto_generated")), None)
-                    if manual:
-                        issue_id = manual.id
+                    for h in db.collection("issues").where("entities.bills", "array_contains", b).stream():
+                        if not h.to_dict().get("auto_generated"):
+                            issue_id = h.id
+                            break
+                    if issue_id:
                         break
 
                 if issue_id is None:
@@ -68,7 +69,9 @@ class IssueClusterService:
                         "updated_at": _now(),
                     }
                     if exists:
-                        ref.update(doc)
+                        # 갱신 시 entities/메타는 보존하고 변동 필드만(향후 엔티티 보강 유실 방지 — codex)
+                        ref.update({k: doc[k] for k in
+                                    ("title", "summary", "status", "keywords", "updated_at")})
                         updated += 1
                     else:
                         doc.update({"started_at": _now(), "events": [], "article_ids": []})
