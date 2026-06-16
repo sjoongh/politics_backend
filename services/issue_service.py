@@ -72,13 +72,17 @@ class IssueService:
             "disclaimer": "매체 성향 분류는 통용되는 기준을 참고한 값이며 절대적이지 않습니다.",
         }
         # 1차 소스 4단 병치(정부/법안/표결/언론) — 연결 확정된 source_items
+        def _public(s):
+            return {k: s.get(k) for k in (
+                "id", "type", "actor_type", "actor_name", "title", "summary",
+                "claim_summary", "position", "source_bias", "url", "published_at", "bill", "vote")}
         si = [d.to_dict() for d in
               db.collection("source_items").where("issue_id", "==", issue_id).stream()]
         ok = [s for s in si if s.get("link_status") in ("auto", "confirmed")]
         issue["source_panels"] = {
-            "government": [s for s in ok if s.get("type") == "gov_policy"],
-            "assembly_bill": [s for s in ok if s.get("type") == "assembly_bill"],
-            "assembly_vote": [s for s in ok if s.get("type") == "assembly_vote"],
+            "government": [_public(s) for s in ok if s.get("type") == "gov_policy"],
+            "assembly_bill": [_public(s) for s in ok if s.get("type") == "assembly_bill"],
+            "assembly_vote": [_public(s) for s in ok if s.get("type") == "assembly_vote"],
             "media": articles,
         }
         return {"success": True, "message": "이슈 상세 조회 성공", "data": issue}

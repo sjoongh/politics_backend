@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import httpx
 
+from google.cloud import firestore
 from firebase.firebase_config import db
 from utils.source_item import normalize_gov_policy, normalize_bill, normalize_vote
 
@@ -31,14 +32,16 @@ def _now():
 
 
 def _save_new(source):
-    """중복(이미 존재) 아니면 저장. 신규 1, 기존 0 반환."""
+    """원자적 create()로 저장(이미 존재하면 AlreadyExists → skip). 신규 1, 기존 0."""
+    from google.api_core import exceptions as gexc
     ref = db.collection("source_items").document(source["id"])
-    if ref.get().exists:
-        return 0
     source["created_at"] = _now()
     source["updated_at"] = source["created_at"]
-    ref.set(source)
-    return 1
+    try:
+        ref.create(source)   # 동시 ingest에도 원자적 — 중복/경합 방지(codex)
+        return 1
+    except gexc.AlreadyExists:
+        return 0
 
 
 class SourceIngestService:
@@ -47,10 +50,17 @@ class SourceIngestService:
         try:
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.get(KOREA_RSS)
+            r.raise_for_status()                 # 4xx/5xx HTML을 XML로 오파싱 방지(codex)
             items = _parse_rss(r.content)[:limit]
-            new = sum(_save_new(normalize_gov_policy(it)) for it in items)
+            new = failed = 0
+            for it in items:                     # per-item skip(한 건 실패가 전체로 번지지 않게)
+                try:
+                    new += _save_new(normalize_gov_policy(it))
+                except Exception as ie:
+                    failed += 1
+                    print(f"[ingest_gov_policy] item skip: {ie!r}")
             return {"success": True, "message": "정부 소스 수집",
-                    "data": {"new": new, "total": len(items)}}
+                    "data": {"new": new, "failed": failed, "total": len(items)}}
         except Exception as e:
             print(f"[ingest_gov_policy] {e!r}")
             return {"success": False, "message": "정부 소스 수집 실패"}
@@ -100,12 +110,15 @@ class SourceIngestService:
         try:
             throttle = ai_throttle_seconds()
             done = 0
-            # type별로 최근 항목을 받아 summary 비어있는 것만 보강(None-쿼리 회피 위해 파이썬 필터)
-            docs = db.collection("source_items").limit(200).stream()
+            # 최신 항목 우선(오래된 실패건이 신규를 굶기지 않게 — codex). summary 비어있는 것만.
+            docs = (db.collection("source_items")
+                    .order_by("created_at", direction=firestore.Query.DESCENDING)
+                    .limit(200).stream())
             targets = [d for d in docs if not (d.to_dict().get("summary"))][:limit]
             for d in targets:
                 s = d.to_dict()
-                enriched, reason = await enrich_source(s.get("title"), s.get("title"))
+                # 정부자료는 발췌(excerpt) 사용, 없으면 제목 — 본문 근거로 요약 품질↑
+                enriched, reason = await enrich_source(s.get("title"), s.get("excerpt") or s.get("title"))
                 if enriched and enriched.get("summary"):
                     d.reference.update({
                         "summary": enriched["summary"],

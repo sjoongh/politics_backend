@@ -12,7 +12,8 @@ class SourceLinkService:
     async def link_unlinked(self, limit: int = 200) -> dict:
         """미연결(link_status='new') 소스를 이슈에 자동 연결하거나 검수 큐로."""
         try:
-            issues = [d.to_dict() for d in db.collection("issues").stream()]
+            # 문서 id 주입(필드에 id 없는 seed 데이터에서 KeyError 방지 — codex)
+            issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
             n_auto = n_pending = 0
             docs = db.collection("source_items").where("link_status", "==", "new").limit(limit).stream()
             for doc in docs:
@@ -47,6 +48,9 @@ class SourceLinkService:
         if action == "confirm":
             patch = {"link_status": "confirmed", "updated_at": _now()}
             if issue_id:
+                # 존재하는 이슈만 연결(오타·임의 ID로 깨진 연결 방지 — codex)
+                if not db.collection("issues").document(issue_id).get().exists:
+                    return {"success": False, "message": "해당 이슈가 존재하지 않습니다."}
                 patch["issue_id"] = issue_id
             ref.update(patch)
         elif action == "reject":

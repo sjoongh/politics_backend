@@ -16,11 +16,25 @@ def _require_admin(x_admin_key: Optional[str]):
 
 
 async def _run_pipeline():
-    await source_ingest_service.ingest_gov_policy()
-    await source_ingest_service.ingest_assembly_bills()
-    await source_ingest_service.ingest_assembly_votes()
-    await source_ingest_service.enrich_pending()
-    await source_link_service.link_unlinked()
+    # 실행 락: 최근 10분 내 실행됐으면 skip(반복 호출 비용 폭주 방지 — codex)
+    from datetime import datetime, timezone, timedelta
+    from firebase.firebase_config import db
+    lock = db.collection("_meta").document("ingest_lock")
+    snap = lock.get()
+    if snap.exists:
+        last = snap.to_dict().get("at")
+        try:
+            if last and datetime.fromisoformat(last) > datetime.now(timezone.utc) - timedelta(minutes=10):
+                print("[ingest] skipped (locked)")
+                return
+        except ValueError:
+            pass
+    lock.set({"at": datetime.now(timezone.utc).isoformat()})
+    print(await source_ingest_service.ingest_gov_policy())
+    print(await source_ingest_service.ingest_assembly_bills())
+    print(await source_ingest_service.ingest_assembly_votes())
+    print(await source_ingest_service.enrich_pending())
+    print(await source_link_service.link_unlinked())
 
 
 @router.post("/ingest", response_model=ResponseModel)

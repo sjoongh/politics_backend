@@ -23,7 +23,9 @@ def make_source_id(actor_type, url):
 
 def extract_entities(text):
     t = text or ""
-    parties = [p for p in _PARTIES if p in t]
+    matched = [p for p in _PARTIES if p in t]
+    # 부분문자열 중복 제거: '더불어민주당' 매칭 시 '민주당' 제외(오탐 방지 — codex)
+    parties = [p for p in matched if not any(p != o and p in o for o in matched)]
     bills = re.findall(r"(?:의안번호|의안)\s*제?\s*(\d{6,})", t) + re.findall(r"\b(\d{7})\b", t)
     return {"people": [], "parties": sorted(set(parties)), "bills": sorted(set(bills))}
 
@@ -41,6 +43,7 @@ def normalize_gov_policy(item):
         "actor_type": "government",
         "actor_name": "대한민국 정부(정책브리핑)",
         "title": title,
+        "excerpt": desc[:300],    # KOGL 공공자료 짧은 발췌(AI 보강 입력용)
         "summary": None,          # Task 5에서 AI 채움
         "claim_summary": None,
         "position": None,
@@ -94,8 +97,8 @@ _VOTE_ABS = ("기권",)
 
 def normalize_vote(bill, vote_rows):
     """열린국회 표결 원자료(의원별 행 리스트) → assembly_vote source_item(집계)."""
-    bill_id = str(bill.get("BILL_ID") or "")
-    name = bill.get("BILL_NAME") or ""
+    bill_id = str(bill.get("BILL_ID") or bill.get("bill_id") or "")
+    name = bill.get("BILL_NAME") or bill.get("bill_name") or ""
     url = bill.get("BILL_URL") or bill.get("DETAIL_LINK") or (
         f"https://likms.assembly.go.kr/bill/billDetail.do?billId={bill_id}" if bill_id else "")
     yes = no = abstain = 0
