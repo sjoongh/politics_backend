@@ -40,6 +40,8 @@ def test_normalize_bill():
     assert s["bill"]["bill_id"] == "PRC_X1"
     assert "PRC_X1" in s["entities"]["bills"]
     assert s["position"] == "propose"
+    assert s["law_name"] == "노란봉투법"
+    assert s["procedural"] is False
 
 
 def test_normalize_vote_aggregates():

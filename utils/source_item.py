@@ -2,6 +2,7 @@
 import re
 import hashlib
 from urllib.parse import urlsplit, parse_qs
+from utils.law_name import normalize_law_name, is_procedural
 
 _TAG = re.compile(r"<[^>]+>")
 _PARTIES = ["더불어민주당", "민주당", "국민의힘", "조국혁신당", "개혁신당", "진보당",
@@ -71,6 +72,8 @@ def normalize_bill(bill):
         "actor_type": "assembly",
         "actor_name": "국회",
         "title": name,
+        "law_name": normalize_law_name(name),
+        "procedural": is_procedural(name),
         "summary": None,
         "claim_summary": None,
         "position": "propose",
@@ -124,6 +127,8 @@ def normalize_vote(bill, vote_rows):
         "actor_type": "assembly",
         "actor_name": "국회 본회의",
         "title": f"표결: {name}",
+        "law_name": normalize_law_name(name),
+        "procedural": is_procedural(name),
         "summary": None,
         "claim_summary": None,
         "position": None,
