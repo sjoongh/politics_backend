@@ -34,6 +34,8 @@ async def _run_pipeline():
     print(await source_ingest_service.ingest_assembly_bills())
     print(await source_ingest_service.ingest_assembly_votes())
     print(await source_ingest_service.enrich_pending())
+    from services.issue_cluster_service import issue_cluster_service
+    print(await issue_cluster_service.generate_bill_issues())  # 법안 기준 이슈 자동생성(링크 전)
     print(await source_link_service.link_unlinked())
 
 

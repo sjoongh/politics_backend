@@ -51,11 +51,13 @@ jobs:
           import asyncio
           from services.source_ingest_service import source_ingest_service as ing
           from services.source_link_service import source_link_service as link
+          from services.issue_cluster_service import issue_cluster_service as cluster
           async def main():
               print(await ing.ingest_gov_policy())
               print(await ing.ingest_assembly_bills())
               print(await ing.ingest_assembly_votes())
               print(await ing.enrich_pending())
+              print(await cluster.generate_bill_issues())
               print(await link.link_unlinked())
           asyncio.run(main())
           PY

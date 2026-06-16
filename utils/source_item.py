@@ -77,7 +77,9 @@ def normalize_bill(bill):
         "source_bias": "official",
         "url": url,
         "published_at": bill.get("PROPOSE_DT") or bill.get("propose_dt") or "",
-        "entities": {"people": [], "parties": [], "bills": [bill_id] if bill_id else []},
+        # bill_id(내부 PRC 해시) + BILL_NO(의안번호) 둘 다 — 정부/뉴스의 의안번호 언급과 매칭되도록
+        "entities": {"people": [], "parties": [],
+                     "bills": [b for b in [bill_id, str(bill.get("BILL_NO") or "").strip()] if b]},
         "bill": {
             "bill_id": bill_id,
             "bill_name": name,
