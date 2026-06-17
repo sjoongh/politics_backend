@@ -48,8 +48,22 @@ class SourceIngestService:
     async def ingest_gov_policy(self, limit: int = 50) -> dict:
         """정책브리핑 korea.kr RSS 수집."""
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(KOREA_RSS)
+            # 정부/공공 사이트는 기본 UA(python-httpx)·CI IP를 막는 경우가 있어 브라우저 UA + 재시도.
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; BriefingKoreaBot/1.0)",
+                       "Accept": "application/rss+xml, application/xml, text/xml, */*"}
+            r = None
+            async with httpx.AsyncClient(timeout=20, headers=headers, follow_redirects=True) as c:
+                for attempt in range(3):
+                    try:
+                        r = await c.get(KOREA_RSS)
+                        if r.status_code == 200:
+                            break
+                    except httpx.HTTPError:
+                        r = None
+                    import asyncio as _a
+                    await _a.sleep(1.5)
+            if r is None:
+                return {"success": False, "message": "정부 소스 수집 실패(요청 불가)"}
             r.raise_for_status()                 # 4xx/5xx HTML을 XML로 오파싱 방지(codex)
             items = _parse_rss(r.content)[:limit]
             new = failed = 0
