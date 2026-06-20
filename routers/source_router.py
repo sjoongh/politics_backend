@@ -38,6 +38,8 @@ async def _run_pipeline():
     print(await issue_cluster_service.generate_bill_issues())  # 법안 기준 이슈 자동생성(링크 전)
     print(await source_link_service.link_unlinked())
     print(await source_link_service.crosslink())               # gov/news 교차연결(4단 패널 채움)
+    from services.news_issue_service import news_issue_service
+    print(await news_issue_service.generate_news_issues())      # 뉴스 기반 현안 이슈 생성
 
 
 @router.post("/ingest", response_model=ResponseModel)
