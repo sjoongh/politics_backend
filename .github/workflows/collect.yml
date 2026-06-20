@@ -60,5 +60,7 @@ jobs:
               print(await cluster.generate_bill_issues())
               print(await link.link_unlinked())
               print(await link.crosslink())
+              from services.news_issue_service import news_issue_service as nis
+              print(await nis.generate_news_issues())
           asyncio.run(main())
           PY
