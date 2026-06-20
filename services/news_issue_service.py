@@ -50,13 +50,13 @@ def _title(names, rep_phrase):
 class NewsIssueService:
     async def generate_news_issues(self, days: int = 7, scan: int = 400) -> dict:
         try:
+            from google.cloud import firestore as _fs
             known = _member_names()
-            raw = [d.to_dict() for d in db.collection("articles").limit(scan).stream()]
-            # 엔티티 부착
+            # 최근 기사 우선(라이브 현안 전제) + 문서 id 보강
+            raw = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
+                   .order_by("published_at", direction=_fs.Query.DESCENDING).limit(scan).stream()]
             arts = []
             for a in raw:
-                if not a.get("id"):
-                    continue
                 a["entities"] = extract_entities(a.get("title"), a.get("ai_summary"), known)
                 arts.append(a)
 
@@ -90,8 +90,9 @@ class NewsIssueService:
                     attached += 1
                     continue
 
-                # 결정적 key는 '토픽'(표현토큰 상위) 기준 — 이름 추출이 좋아져도 동일 이슈 유지(중복 방지).
-                topic = " ".join(sorted(c["phrase_tokens"])[:4]) or rep or "|".join(sorted(names))
+                # 결정적 key는 빈도기반 대표 phrase(정규화) 기준 — 사전순 토큰보다 안정적(codex).
+                from utils.news_entities import normalize_phrase
+                topic = normalize_phrase(rep) or "|".join(sorted(names)) or " ".join(sorted(c["phrase_tokens"])[:3])
                 key = hashlib.sha1(topic.encode()).hexdigest()[:14]
                 issue_id = f"issue_news_{key}"
                 ref = db.collection("issues").document(issue_id)
@@ -111,9 +112,12 @@ class NewsIssueService:
                     "updated_at": _now(),
                 }
                 if exists:
-                    ref.update({k: doc[k] for k in
-                                ("title", "summary", "keywords", "article_ids",
-                                 "newsworthiness", "updated_at")})
+                    # article_ids는 합집합으로(과거 연결 기사 유실 방지 — codex)
+                    cur = set(ref.get().to_dict().get("article_ids") or [])
+                    patch = {k: doc[k] for k in
+                             ("title", "summary", "keywords", "newsworthiness", "updated_at")}
+                    patch["article_ids"] = list(cur | set(c["article_ids"]))
+                    ref.update(patch)
                     updated += 1
                 else:
                     doc.update({"started_at": _now(), "events": []})

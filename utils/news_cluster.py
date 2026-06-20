@@ -17,12 +17,18 @@ def _ts(a):
         return None
 
 
+# 프레이밍/범용 토큰 — 이걸로만 연결되면 엉뚱한 사건이 합쳐짐(codex). 링크 신호에서 제외.
+_STOP_TOKENS = {"논란", "입장", "발표", "촉구", "요구", "비판", "반발", "공방", "의혹",
+                "사퇴", "규탄", "강조", "주장", "우려", "지적", "전망", "예고", "결정",
+                "국민", "정부", "여당", "야당", "대통령"}
+
+
 def _phrase_tokens(phrases):
-    """phrase를 길이 2+ 토큰으로(공유 토큰 매칭용)."""
+    """phrase를 길이 2+ 토큰으로(공유 토큰 매칭용). 범용 프레이밍 토큰은 제외."""
     toks = set()
     for p in phrases or []:
         for t in re.split(r"\s+", p):
-            if len(t) >= 2:
+            if len(t) >= 2 and t not in _STOP_TOKENS:
                 toks.add(t)
     return toks
 
@@ -79,7 +85,7 @@ def cluster_articles(articles, window_days=7, min_articles=2, min_sources=2):
         if len(ids) < min_articles:
             continue
         members = [by_id[i] for i in ids]
-        sources = {m.get("source") for m in members}
+        sources = {m.get("source") for m in members if m.get("source")}  # None 출처 제외(codex)
         if len(sources) < min_sources:
             continue
         names, ptoks = set(), set()
