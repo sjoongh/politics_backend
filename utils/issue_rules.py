@@ -1,7 +1,8 @@
 """이슈 추적 순수 로직 (firebase 비의존, 테스트 대상)."""
 
 VALID_STATUS = {"진행중", "계류", "가결", "부결", "종결", "소강"}
-SUMMARY_KEYS = ("id", "slug", "title", "summary", "status", "category", "started_at", "updated_at")
+SUMMARY_KEYS = ("id", "slug", "title", "summary", "status", "category", "started_at", "updated_at",
+                "auto_generated", "auto_key", "newsworthiness")
 PATCHABLE_FIELDS = {"title", "summary", "status", "category", "slug", "keywords", "official_links"}
 ARTICLE_PUBLIC_KEYS = ("id", "title", "ai_summary", "source", "source_url", "image_url", "category", "published_at")
 
