@@ -8,7 +8,7 @@
 from datetime import datetime, timezone
 from firebase.firebase_config import db
 from utils.bill_cluster import cluster_by_bill
-from utils.newsworthiness import issue_score, PROMOTE
+from utils.newsworthiness import issue_score, vote_contention, PROMOTE
 
 
 def _now():
@@ -65,11 +65,15 @@ class IssueClusterService:
 
                 if issue_id is None:
                     # 자동 이슈: 사건성 게이트(절차적 대안법안 도배 방지 — codex)
-                    score = issue_score({"procedural": procedural}, items,
-                                        article_count=_article_count(law_name))
+                    ac = _article_count(law_name)
+                    score = issue_score({"procedural": procedural}, items, article_count=ac)
+                    contention = max((vote_contention(s.get("vote")) for s in items
+                                      if s.get("type") == "assembly_vote"), default=0.0)
+                    # 언론보도X·갈등약·소스 2종이하면 routine → 제외. 단 정부+법안+표결 등 3종↑ 문서화 법안은 통과(codex)
+                    routine = (ac == 0 and contention < 0.5 and len(c.get("types", [])) < 3)
                     ref = db.collection("issues").document(f"issue_bill_{cbid}")
                     exists = ref.get().exists
-                    if score < PROMOTE:
+                    if score < PROMOTE or routine:
                         # 사건성 미달: 생성 보류. 기존 자동이슈가 있으면 정리(소스 미연결로 되돌림).
                         if exists:
                             ref.delete()
