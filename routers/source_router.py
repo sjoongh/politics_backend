@@ -40,6 +40,7 @@ async def _run_pipeline():
     print(await source_link_service.crosslink())               # gov/news 교차연결(4단 패널 채움)
     from services.news_issue_service import news_issue_service
     print(await news_issue_service.generate_news_issues())      # 뉴스 기반 현안 이슈 생성
+    print(await news_issue_service.summarize_pending_issues())  # 자동 이슈 AI 사건요약
 
 
 @router.post("/ingest", response_model=ResponseModel)

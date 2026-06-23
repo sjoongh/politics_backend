@@ -132,4 +132,39 @@ class NewsIssueService:
             return {"success": False, "message": "뉴스 이슈 생성 실패"}
 
 
+    async def summarize_pending_issues(self, limit: int = 6) -> dict:
+        """자동 이슈의 템플릿 요약을 AI 사건요약으로 교체(승격된 것만, throttle). 무료쿼터 보호."""
+        import asyncio
+        from utils.gemini_rest import summarize_issue
+        from utils.collect_config import ai_throttle_seconds
+        try:
+            throttle = ai_throttle_seconds()
+            autos = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+                     if d.to_dict().get("auto_generated") and not d.to_dict().get("ai_summarized")]
+            # 사건성 높은 것부터
+            autos.sort(key=lambda x: x.get("newsworthiness", 0), reverse=True)
+            done = 0
+            for iss in autos[:limit]:
+                snippets = []
+                for aid in (iss.get("article_ids") or [])[:8]:
+                    adoc = db.collection("articles").document(aid).get()
+                    if adoc.exists:
+                        a = adoc.to_dict()
+                        snippets.append((a.get("title") or "") + " — " + (a.get("ai_summary") or "")[:120])
+                if not snippets:
+                    continue
+                summary, reason = await summarize_issue(iss.get("title"), snippets)
+                if not summary:
+                    continue  # 실패(쿼터 등) 시 마킹 안 함 → 다음 run 재시도
+                db.collection("issues").document(iss["id"]).update(
+                    {"summary": summary, "ai_summarized": True, "updated_at": _now()})
+                done += 1
+                if throttle:
+                    await asyncio.sleep(throttle)
+            return {"success": True, "message": "AI 사건요약", "data": {"summarized": done, "scanned": len(autos[:limit])}}
+        except Exception as e:
+            print(f"[summarize_pending_issues] {e!r}")
+            return {"success": False, "message": "AI 사건요약 실패"}
+
+
 news_issue_service = NewsIssueService()
