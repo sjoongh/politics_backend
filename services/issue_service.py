@@ -87,10 +87,12 @@ class IssueService:
         si = [d.to_dict() for d in
               db.collection("source_items").where("issue_id", "==", issue_id).stream()]
         ok = [s for s in si if s.get("link_status") in ("auto", "confirmed")]
+        from utils.party_stance import group_by_party
         issue["source_panels"] = {
             "government": [_public(s) for s in ok if s.get("type") == "gov_policy"],
             "assembly_bill": [_public(s) for s in ok if s.get("type") == "assembly_bill"],
             "assembly_vote": [_public(s) for s in ok if s.get("type") == "assembly_vote"],
+            "party": group_by_party(articles),   # 기사에서 도출한 정당별 입장
             "media": articles,
         }
         return {"success": True, "message": "이슈 상세 조회 성공", "data": issue}
