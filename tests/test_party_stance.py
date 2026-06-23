@@ -1,4 +1,11 @@
-from utils.party_stance import detect_parties, group_by_party
+from utils.party_stance import detect_parties, group_by_party, primary_party
+
+
+def test_primary_party_is_first_in_title():
+    # '국힘이 민주당 비판' → 발화 주체는 국민의힘 1곳만
+    assert primary_party("국힘, 민주당 거짓선동 비판") == "국민의힘"
+    assert primary_party("진성준 대주주 반대", "더불어민주당 입장") == "더불어민주당"  # 제목에 정당 없으면 요약
+    assert primary_party("날씨 맑음", "") is None
 
 
 def test_detect_parties_dedup():

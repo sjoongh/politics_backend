@@ -20,17 +20,33 @@ def detect_parties(text):
     return out
 
 
+def primary_party(title, summary=""):
+    """기사의 '발화 주체' 정당 — 제목에서 가장 먼저 등장하는 정당(한국 뉴스는 주체를 앞세움).
+    제목에 없으면 요약의 첫 정당. 없으면 None.
+    '국힘이 민주당 비판' → 국민의힘만 귀속(단순 언급 오탐 방지 — codex)."""
+    for text in (title or "", summary or ""):
+        best, best_pos = None, len(text) + 1
+        for alias in _PARTIES:
+            pos = text.find(alias)
+            if pos != -1 and pos < best_pos:
+                best, best_pos = _CANON.get(alias, alias), pos
+        if best:
+            return best
+    return None
+
+
 def group_by_party(articles):
-    """기사 목록 → [{party, count, articles[{title, source, source_url}]}] (기사 수 내림차순)."""
+    """기사 목록 → [{party, count, articles}] — 각 기사를 '발화 주체' 정당 1곳에만 귀속."""
     groups = {}
     for a in (articles or []):
-        blob = (a.get("title") or "") + " " + (a.get("ai_summary") or "")
-        for p in detect_parties(blob):
-            groups.setdefault(p, []).append({
-                "title": a.get("title"),
-                "source": a.get("source"),
-                "source_url": a.get("source_url"),
-            })
+        p = primary_party(a.get("title"), a.get("ai_summary"))
+        if not p:
+            continue
+        groups.setdefault(p, []).append({
+            "title": a.get("title"),
+            "source": a.get("source"),
+            "source_url": a.get("source_url"),
+        })
     out = [{"party": p, "count": len(v), "articles": v[:5]} for p, v in groups.items()]
     out.sort(key=lambda g: g["count"], reverse=True)
     return out
