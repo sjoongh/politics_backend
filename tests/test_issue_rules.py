@@ -15,8 +15,9 @@ def test_to_summary_only_summary_keys():
              "category": "정치", "started_at": "a", "updated_at": "b",
              "events": [1, 2], "article_ids": ["z"], "secret": "no"}
     out = to_summary(issue)
-    assert set(out.keys()) == set(SUMMARY_KEYS)
-    assert "events" not in out and "secret" not in out
+    assert set(out.keys()) == set(SUMMARY_KEYS) | {"issue_type"}   # 유형 라벨 추가
+    assert out["issue_type"] == "manual"   # auto_key 없으면 manual
+    assert "events" not in out and "secret" not in out and "auto_key" not in out
     assert out["title"] == "t"
 
 

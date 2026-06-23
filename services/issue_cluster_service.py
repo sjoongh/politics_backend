@@ -69,8 +69,8 @@ class IssueClusterService:
                     score = issue_score({"procedural": procedural}, items, article_count=ac)
                     contention = max((vote_contention(s.get("vote")) for s in items
                                       if s.get("type") == "assembly_vote"), default=0.0)
-                    # 언론 보도도 없고 표결 갈등도 약하면 routine 법안 → 이슈로 안 띄움(niche 위원회법안 차단)
-                    routine = (ac == 0 and contention < 0.5)
+                    # 언론보도X·갈등약·소스 2종이하면 routine → 제외. 단 정부+법안+표결 등 3종↑ 문서화 법안은 통과(codex)
+                    routine = (ac == 0 and contention < 0.5 and len(c.get("types", [])) < 3)
                     ref = db.collection("issues").document(f"issue_bill_{cbid}")
                     exists = ref.get().exists
                     if score < PROMOTE or routine:
