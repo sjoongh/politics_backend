@@ -62,5 +62,6 @@ jobs:
               print(await link.crosslink())
               from services.news_issue_service import news_issue_service as nis
               print(await nis.generate_news_issues())
+              print(await nis.summarize_pending_issues())
           asyncio.run(main())
           PY
