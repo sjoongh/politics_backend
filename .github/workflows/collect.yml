@@ -63,5 +63,7 @@ jobs:
               from services.news_issue_service import news_issue_service as nis
               print(await nis.generate_news_issues())
               print(await nis.summarize_pending_issues())
+              from services.member_service import member_service as ms
+              print(await ms.enrich_member_bills())
           asyncio.run(main())
           PY
