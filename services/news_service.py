@@ -36,6 +36,11 @@ class NewsService:
                 "http://www.khan.co.kr/rss/rssdata/politic_news.xml",  # 경향신문 정치
                 "https://news.sbs.co.kr/news/SectionRssFeed.do?sectionId=01",  # SBS 정치
                 "http://rss.ohmynews.com/rss/politics.xml",  # 오마이뉴스 정치
+                "https://www.chosun.com/arc/outboundfeeds/rss/category/politics/?outputType=xml",  # 조선일보(보수)
+                "https://www.pressian.com/api/v3/site/rss/section/65",  # 프레시안(진보)
+                "https://www.newsis.com/RSS/politics.xml",  # 뉴시스(통신)
+                "https://www.seoul.co.kr/xml/rss/rss_politics.xml",  # 서울신문
+                "https://fs.jtbc.co.kr/RSS/politics.xml",  # JTBC
             ],
             "대통령": [
                 "https://www.korea.kr/rss/president.xml",  # 대통령실 공식
