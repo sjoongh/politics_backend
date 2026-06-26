@@ -1,5 +1,13 @@
 import os
-from fastapi import HTTPException, APIRouter, status, Depends, BackgroundTasks, Header, Query
+from fastapi import HTTPException, APIRouter, status, Depends, BackgroundTasks, Header, Query, Request
+from utils.rate_limit import RateLimiter
+
+_ai_search_limiter = RateLimiter(max_calls=15, window_sec=60)  # IP당 분당 15회
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    return xff.split(",")[0].strip() if xff else (request.client.host if request.client else "unknown")
 from typing import Dict, Any, Optional
 
 from services.auth_service import auth_service
@@ -40,12 +48,18 @@ async def search_news(
 
 @router.get("/search/ai", response_model=ResponseModel)
 async def ai_search_news(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=200),
     include_briefing: bool = False,
     limit: int = Query(20, ge=1, le=50),
 ):
     """AI 자연어 검색. Gemini로 질의를 구조화해 랭킹하고, 옵션으로 짧은 브리핑을 생성.
     Gemini 키가 없거나 실패하면 부분문자열 폴백으로 동작한다."""
+    ip = _client_ip(request)
+    if not _ai_search_limiter.allow(ip):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+                            headers={"Retry-After": str(_ai_search_limiter.retry_after(ip))})
     query = q.strip()
     if not query:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="검색어를 입력해 주세요.")
