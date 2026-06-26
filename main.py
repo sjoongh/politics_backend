@@ -10,6 +10,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # 환경 변수 로드
 load_dotenv()
 
+# 관측성: SENTRY_DSN 설정 시에만 에러 모니터링 활성(미설정·미설치면 no-op)
+if os.getenv("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=os.getenv("SENTRY_DSN"),
+                        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "0.0")),
+                        environment=os.getenv("VERCEL_ENV", "production"))
+    except Exception as _e:  # 설치 안 됨 등 — 모니터링 없이 계속
+        print(f"[sentry] init skipped: {_e!r}")
+
 # FastAPI 앱 생성
 app = FastAPI(
     title="정치 뉴스 추적 API",

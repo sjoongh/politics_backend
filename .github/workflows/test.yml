@@ -1,0 +1,18 @@
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # 순수 로직 테스트는 외부 의존 없음 — 가벼운 의존만 설치
+      - run: pip install pytest python-dateutil httpx
+      - name: Run pure-logic tests
+        run: pytest tests/ -q

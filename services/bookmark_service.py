@@ -18,12 +18,11 @@ class BookmarkService:
         return bookmark
 
     def get_bookmarks(self, user_id: str, limit: int = 20):
+        # 단일 필터(복합 인덱스 불필요) 후 파이썬에서 최신순 정렬 — Firestore composite index 없이 동작
         bookmarks_ref = db.collection("bookmarks")
-        query = bookmarks_ref.where("user_id", "==", user_id)
-        query = query.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit)
-
-        docs = query.stream()
-        bookmarks = [doc.to_dict() for doc in docs]
-        return bookmarks
+        docs = bookmarks_ref.where("user_id", "==", user_id).limit(200).stream()
+        bookmarks = sorted((d.to_dict() for d in docs),
+                           key=lambda b: str(b.get("created_at") or ""), reverse=True)
+        return bookmarks[:limit]
 
 bookmark_service = BookmarkService()
