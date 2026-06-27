@@ -173,7 +173,10 @@ class NewsService:
             for category_name, feed_urls in feeds_to_process:
                 for feed_url in feed_urls:
                     try:
-                        response = requests.get(feed_url)
+                        # 일부 언론사는 기본 UA 차단 + 무한대기 방지 위해 UA·타임아웃 지정
+                        response = requests.get(
+                            feed_url, timeout=15,
+                            headers={"User-Agent": "Mozilla/5.0 (compatible; BriefingKoreaBot/1.0)"})
                         response.encoding = 'utf-8'
                         feed = feedparser.parse(response.text)
                         if feed.bozo:
