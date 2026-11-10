@@ -5,6 +5,7 @@ import os
 import json
 import httpx
 from utils.ttl_cache import TTLCache
+from utils.ai_budget import budget
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -43,10 +44,13 @@ def _extract_json(text):
         return None
 
 
-async def _generate(prompt: str, *, json_mode: bool, timeout: float):
+async def _generate(prompt: str, *, json_mode: bool, timeout: float, kind: str = "misc"):
     key = _key()
     if not key:
         return None, "no_api_key"
+    # 무료 티어 일일 예산(전체+종류별). 거부되면 호출 자체를 하지 않는다.
+    if not budget().try_acquire(kind):
+        return None, "budget"
     # API 키는 URL 쿼리스트링 대신 헤더로(프록시/로그 노출 최소화 — codex)
     url = f"{_BASE}/{_model()}:generateContent"
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
@@ -58,6 +62,8 @@ async def _generate(prompt: str, *, json_mode: bool, timeout: float):
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(url, json=payload, headers=headers)
         if r.status_code != 200:
+            if r.status_code == 429:
+                budget().mark_exhausted()   # 쿼터 소진: 그날 남은 호출 즉시 중단
             return None, f"http_{r.status_code}"
         data = r.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -96,7 +102,7 @@ async def parse_query(q: str):
     cached = _PARSE_CACHE.get(ckey)
     if cached is not None:
         return cached, "cache"
-    text, reason = await _generate(_PARSE_PROMPT.format(q=q.replace('"', "'")), json_mode=True, timeout=6.0)
+    text, reason = await _generate(_PARSE_PROMPT.format(q=q.replace('"', "'")), json_mode=True, timeout=6.0, kind="search")
     if text is None:
         return None, reason
     obj = _extract_json(text)
@@ -158,7 +164,7 @@ async def summarize_issue(title, snippets):
     """이슈 제목 + 기사 스니펫들 → 2~3문장 요약. 실패 시 (None, reason)."""
     body = "\n".join(f"- {s}" for s in (snippets or [])[:8])[:1800]
     text, reason = await _generate(_ISSUE_SUMMARY_PROMPT.format(title=(title or "")[:120], body=body),
-                                   json_mode=True, timeout=10.0)
+                                   json_mode=True, timeout=10.0, kind="summary")
     if text is None:
         return None, reason
     obj = _extract_json(text)
@@ -171,7 +177,7 @@ async def enrich_source(title, body):
     """1차 소스 → (summary, claim_summary, position). 실패 시 (None, reason)."""
     text, reason = await _generate(
         _ENRICH_PROMPT.format(title=(title or "")[:200], body=(body or "")[:1500]),
-        json_mode=True, timeout=8.0)
+        json_mode=True, timeout=8.0, kind="enrich")
     if text is None:
         return None, reason
     obj = _extract_json(text)
@@ -200,7 +206,7 @@ async def synthesize_briefing(q: str, articles: list):
     if cached is not None:
         return cached, "cache"
     valid_ids = {str(a.get("id")) for a in top if a.get("id")}
-    text, reason = await _generate(_briefing_prompt(q, top), json_mode=True, timeout=12.0)
+    text, reason = await _generate(_briefing_prompt(q, top), json_mode=True, timeout=12.0, kind="briefing")
     if text is None:
         return None, reason
     obj = _extract_json(text)
