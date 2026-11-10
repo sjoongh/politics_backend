@@ -1,9 +1,17 @@
 {
   "version": 2,
   "functions": {
-    "api/index.py": { "maxDuration": 60 }
+    "api/index.py": {
+      "maxDuration": 60
+    }
   },
   "routes": [
-    { "src": "/(.*)", "dest": "/api/index" }
+    {
+      "src": "/(.*)",
+      "dest": "/api/index"
+    }
+  ],
+  "regions": [
+    "icn1"
   ]
 }
