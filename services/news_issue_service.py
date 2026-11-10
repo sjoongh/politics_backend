@@ -11,6 +11,8 @@ from firebase.firebase_config import db
 from utils.news_entities import extract_entities
 from utils.news_cluster import cluster_articles
 from utils.article_meta import attach_articles
+from utils.issue_merge import top_person, clean_title, should_merge
+from utils.fallback_summary import fallback_summary
 
 
 def _now():
@@ -49,15 +51,20 @@ def _title(names, rep_phrase):
 
 
 class NewsIssueService:
-    async def generate_news_issues(self, days: int = 7, scan: int = 400) -> dict:
+    async def generate_news_issues(self, days: int = 7, scan: int = 400, ctx=None) -> dict:
+        """ctx(PipelineContext)가 있으면 기사·이슈·의원명을 공유 로더에서 받아 읽기를 아낀다."""
         try:
             from google.cloud import firestore as _fs
-            known = _member_names()
-            # 최근 기사 우선(라이브 현안 전제) + 문서 id 보강
-            raw = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
-                   .order_by("published_at", direction=_fs.Query.DESCENDING).limit(scan).stream()]
+            now_dt = datetime.now(timezone.utc)
+            known = ctx.member_names() if ctx else _member_names()
+            if ctx:
+                raw = ctx.articles(scan)
+            else:
+                raw = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
+                       .order_by("published_at", direction=_fs.Query.DESCENDING).limit(scan).stream()]
             arts = []
             for a in raw:
+                a = dict(a)
                 a["entities"] = extract_entities(a.get("title"), a.get("ai_summary"), known)
                 arts.append(a)
 
@@ -65,29 +72,45 @@ class NewsIssueService:
             by_id = {a["id"]: a for a in arts}
 
             created = updated = attached = 0
-            existing = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
+            touched = []
+            if ctx:
+                existing = ctx.active_issues()
+            else:
+                existing = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+                            if d.to_dict().get("active") is not False]
 
             for c in clusters:
                 members = [by_id[i] for i in c["article_ids"]]
                 rep = _rep_phrase(members)
                 names = c["names"]
                 ptoks = set(c["phrase_tokens"])
+                person = top_person(members) or (names[0] if names else None)
+                people = ([person] if person else []) + [n for n in names if n != person]
+                cluster = {"article_ids": set(c["article_ids"]), "person": person, "phrases": [rep] if rep else []}
 
-                # 기존 이슈(수동/법안)와 강한 겹침이면 거기에 기사 attach(중복 이슈 방지)
+                # 기존 이슈 대조: 수동/법안은 제목·키워드 겹침, 뉴스 이슈는 should_merge(오병합 방지 기준)
                 target = None
                 for iss in existing:
-                    if iss.get("auto_key", "").startswith("news:"):
+                    if str(iss.get("auto_key") or "").startswith("news:"):
+                        if should_merge(cluster, iss, now_dt):
+                            target = iss
+                            break
                         continue
                     hay = (iss.get("title", "") + " " + " ".join(iss.get("keywords") or []))
                     if (any(n in hay for n in names) and (ptoks & set(re.split(r"\s+", hay)))) \
                             or (rep and rep in hay):
-                        target = iss["id"]
+                        target = iss
                         break
 
                 if target:
-                    ref = db.collection("issues").document(target)
+                    ref = db.collection("issues").document(target["id"])
                     cur_doc = ref.get().to_dict() or {}
-                    ref.update({**attach_articles(cur_doc, members), "updated_at": _now()})
+                    patch = {**attach_articles(cur_doc, members), "updated_at": _now()}
+                    if cur_doc.get("auto_generated") and not cur_doc.get("ai_summarized"):
+                        patch["summary"] = fallback_summary({**cur_doc, **patch}, by_id)
+                    ref.update(patch)
+                    target.update(patch)
+                    touched.append(target["id"])
                     attached += 1
                     continue
 
@@ -97,38 +120,42 @@ class NewsIssueService:
                 key = hashlib.sha1(topic.encode()).hexdigest()[:14]
                 issue_id = f"issue_news_{key}"
                 ref = db.collection("issues").document(issue_id)
-                exists = ref.get().exists
+                snap = ref.get()
                 doc = {
                     "id": issue_id,
-                    "title": _title(names, rep),
-                    "summary": f"여러 매체가 보도한 현안입니다(관련 기사 {c['count']}건·출처 {c['sources']}곳).",
+                    "title": clean_title(person, rep),
                     "status": "진행중",
                     "category": "정치",
-                    "keywords": [k for k in ([rep] + names) if k][:6],
-                    "entities": {"bills": [], "parties": [], "people": names},
-                    "article_ids": c["article_ids"],
+                    "keywords": [k for k in ([rep] + people) if k][:6],
+                    "entities": {"bills": [], "parties": [], "people": people},
                     "newsworthiness": round(2 + c["count"] * 0.8 + c["sources"] * 0.6, 2),
                     "auto_generated": True,
                     "auto_key": f"news:{key}",
+                    "active": True,
                     "updated_at": _now(),
                 }
-                if exists:
-                    # article_ids는 합집합으로(과거 연결 기사 유실 방지 — codex) + article_meta 갱신
-                    cur_doc = ref.get().to_dict() or {}
-                    patch = {k: doc[k] for k in
-                             ("title", "summary", "keywords", "newsworthiness", "updated_at")}
+                if snap.exists:
+                    cur_doc = snap.to_dict() or {}
+                    patch = {k: doc[k] for k in ("title", "keywords", "newsworthiness", "updated_at")}
                     patch.update(attach_articles(cur_doc, members))
+                    if not cur_doc.get("ai_summarized"):
+                        patch["summary"] = fallback_summary({**cur_doc, **patch, "auto_key": doc["auto_key"]}, by_id)
+                    if cur_doc.get("active") is None:
+                        patch["active"] = True
                     ref.update(patch)
                     updated += 1
                 else:
-                    doc.update({"started_at": _now(), "events": []})
+                    doc.update({"started_at": _now(), "events": [], "ai_summarized": False})
                     doc.update(attach_articles({"article_ids": []}, members))
+                    doc["summary"] = fallback_summary(doc, by_id)
                     ref.set(doc)
+                    existing.append(doc)
                     created += 1
+                touched.append(issue_id)
 
             return {"success": True, "message": "뉴스 현안 이슈 생성",
                     "data": {"clusters": len(clusters), "created": created,
-                             "updated": updated, "attached": attached}}
+                             "updated": updated, "attached": attached, "issue_ids": touched}}
         except Exception as e:
             print(f"[generate_news_issues] {e!r}")
             return {"success": False, "message": "뉴스 이슈 생성 실패"}

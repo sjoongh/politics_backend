@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from firebase.firebase_config import db
 from utils.bill_cluster import cluster_by_bill
 from utils.newsworthiness import issue_score, vote_contention, PROMOTE
+from utils.fallback_summary import fallback_summary
 
 
 def _now():
@@ -86,7 +87,6 @@ class IssueClusterService:
                     doc = {
                         "id": issue_id,
                         "title": c["bill_name"],
-                        "summary": f"‘{law_name}’ 관련 정부·국회 1차 소스를 묶은 이슈입니다.",
                         "status": c["status"] or "진행중",
                         "category": "정치",
                         "keywords": [law_name],
@@ -96,15 +96,23 @@ class IssueClusterService:
                         "newsworthiness": score,
                         "auto_generated": True,
                         "auto_key": f"bill:{cbid}",
+                        "active": True,
                         "updated_at": _now(),
                     }
+                    doc["summary"] = fallback_summary(doc, {})
                     if exists:
-                        ref.update({k: doc[k] for k in
-                                    ("title", "summary", "status", "keywords",
-                                     "law_name", "procedural", "newsworthiness", "updated_at")})
+                        cur_doc = ref.get().to_dict() or {}
+                        patch = {k: doc[k] for k in
+                                 ("title", "status", "keywords", "law_name", "procedural",
+                                  "newsworthiness", "updated_at")}
+                        if not cur_doc.get("ai_summarized"):
+                            patch["summary"] = doc["summary"]
+                        if cur_doc.get("active") is None:
+                            patch["active"] = True
+                        ref.update(patch)
                         updated += 1
                     else:
-                        doc.update({"started_at": _now(), "events": [], "article_ids": []})
+                        doc.update({"started_at": _now(), "events": [], "article_ids": [], "ai_summarized": False})
                         ref.set(doc)
                         created += 1
 
