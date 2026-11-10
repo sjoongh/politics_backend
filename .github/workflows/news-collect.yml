@@ -1,4 +1,5 @@
 name: News Collect (hourly)
+# 2026-11-10: 스케줄 재등록 실험 — 소유자 계정으로 워크플로 파일 최종 수정(schedule actor 갱신)
 on:
   schedule:
     - cron: "5 * * * *"   # 매시 5분(정각은 GitHub 혼잡으로 드랍 잦음; 재활성화 후 스케줄 재등록 위해 변경 2026-11-10)
