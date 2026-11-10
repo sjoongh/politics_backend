@@ -1,10 +1,12 @@
 import os
-from fastapi import APIRouter, HTTPException, status, Header, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, Header, BackgroundTasks, Response
 from typing import Optional
 
 from models.model import ResponseModel
 from services.source_ingest_service import source_ingest_service
 from services.source_link_service import source_link_service
+from services.source_list_service import source_list_service
+from utils.http_cache import cache_headers
 
 router = APIRouter()
 
@@ -41,6 +43,18 @@ async def _run_pipeline():
     from services.news_issue_service import news_issue_service
     print(await news_issue_service.generate_news_issues())      # 뉴스 기반 현안 이슈 생성
     print(await news_issue_service.summarize_pending_issues())  # 자동 이슈 AI 사건요약
+
+
+@router.get("", response_model=ResponseModel)
+def list_sources(response: Response, type: Optional[str] = None, cursor: Optional[str] = None, limit: int = 30):
+    """공개 소스 목록(법안·표결·정부 발표 둘러보기). published_at 역순, 커서 페이지."""
+    if not type:
+        raise HTTPException(status_code=400, detail="type이 필요합니다.", headers=cache_headers(False))
+    result = source_list_service.list(type, cursor, limit)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message"), headers=cache_headers(False))
+    response.headers.update(cache_headers(True))
+    return result
 
 
 @router.post("/ingest", response_model=ResponseModel)

@@ -21,5 +21,6 @@ async def general_exception_handler(request: Request, exc: Exception):
             "success": False,
             "message": "서버 내부 오류가 발생했습니다.",
             "detail": str(exc)  # 필요시 로깅용 디버깅 메시지 포함 가능
-        }
+        },
+        headers={"Cache-Control": "no-store"},
     )
