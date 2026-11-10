@@ -1,4 +1,4 @@
-name: News Collect
+name: News Collect (hourly)
 on:
   schedule:
     - cron: "5 * * * *"   # 매시 5분(정각은 GitHub 혼잡으로 드랍 잦음; 재활성화 후 스케줄 재등록 위해 변경 2026-11-10)
@@ -77,4 +77,4 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/collect.yml/enable"
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/news-collect.yml/enable"
