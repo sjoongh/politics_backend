@@ -79,8 +79,19 @@ _PARSE_PROMPT = """다음 한국어 검색 질의를 정치뉴스 검색용 JSON
 """
 
 
+def search_gemini_enabled() -> bool:
+    """AI 검색(질의 구조화·브리핑)의 Gemini 호출 스위치. 기본 꺼짐.
+
+    무료 티어가 프로젝트당 하루 20건이라 수집 크론과 공존 불가 → 검색은 키워드 폴백으로 운영.
+    켜려면 AI_SEARCH_GEMINI=1. 수집 쪽(enrich_source/summarize_issue)은 영향 없음.
+    """
+    return os.getenv("AI_SEARCH_GEMINI", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 async def parse_query(q: str):
     """자연어 질의 → 구조화 dict. 실패 시 (None, reason). 캐시 히트 시 reason='cache'."""
+    if not search_gemini_enabled():
+        return None, "disabled"
     ckey = _norm(q)
     cached = _PARSE_CACHE.get(ckey)
     if cached is not None:
@@ -176,6 +187,8 @@ async def enrich_source(title, body):
 
 async def synthesize_briefing(q: str, articles: list):
     """상위 기사 기반 짧은 브리핑 답변. 실패 시 (None, reason)."""
+    if not search_gemini_enabled():
+        return None, "disabled"
     if not articles:
         return None, "no_articles"
     top = articles[:5]
