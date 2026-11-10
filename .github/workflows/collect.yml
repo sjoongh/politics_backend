@@ -1,7 +1,7 @@
 name: News Collect
 on:
   schedule:
-    - cron: "0 * * * *"   # 매시(정치뉴스 속보성 위해 하루1회→시간별)
+    - cron: "5 * * * *"   # 매시 5분(정각은 GitHub 혼잡으로 드랍 잦음; 재활성화 후 스케줄 재등록 위해 변경 2026-11-10)
   workflow_dispatch: {}
 permissions:
   contents: read
