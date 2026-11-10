@@ -12,6 +12,7 @@ from firebase.firebase_config import db
 from google.cloud import firestore
 import traceback
 from utils.ai_parsing import extract_json_block
+from utils.ai_budget import budget
 
 class AISummaryService:
     def __init__(self):
@@ -31,6 +32,8 @@ class AISummaryService:
                 if result.get("success"):
                     return result
                 last = result
+                if result.get("budget"):
+                    return last   # 예산 거부는 재시도하지 않는다
             except Exception as e:
                 last = {"success": False, "message": str(e)}
             if attempt < max_retries - 1:
@@ -134,6 +137,9 @@ class AISummaryService:
         try:
             if self.model is None:
                 return {"success": False, "message": "AI 비활성(google-generativeai 미설치)"}
+            # 무료 티어 일일 예산(기사 요약은 kind="article", 기본 상한 0 → 수집 시 RSS 요약으로 저장)
+            if not budget().try_acquire("article"):
+                return {"success": False, "message": "budget", "budget": True}
             prompt = self._build_prompt(category, title, content)
 
             # Gemini API 호출 (비동기)
@@ -164,6 +170,8 @@ class AISummaryService:
         try:
             if self.model is None:
                 return "AI 비활성(google-generativeai 미설치)"
+            if not budget().try_acquire("daily"):
+                return ""
             category_summaries = []
             for category, articles in categorized_articles.items():
                 if articles:

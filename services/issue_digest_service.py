@@ -50,10 +50,17 @@ class IssueDigestService:
                 out.append(s)
         return out
 
-    def refresh(self, issue_ids=None, sources_by_issue=None, press=None) -> dict:
+    def refresh(self, issue_ids=None, sources_by_issue=None, press=None, ctx=None) -> dict:
         press = _press_enabled() if press is None else press
         now = datetime.now(timezone.utc)
-        issues = self._load_issues(issue_ids)
+        if ctx is not None and issue_ids is None:
+            issue_ids = ctx.changed_issue_ids
+        if ctx is not None and issue_ids:
+            wanted = set(issue_ids)
+            issues = [i for i in ctx.active_issues() if i["id"] in wanted]
+            # ctx의 이슈는 파이프라인 중 갱신된 patch가 반영돼 있어 재조회 없이 쓴다
+        else:
+            issues = self._load_issues(issue_ids)
         updated = scanned = 0
         for iss in issues:
             scanned += 1
@@ -69,6 +76,7 @@ class IssueDigestService:
                 patch["active"] = True
             if patch:
                 db.collection(COLLECTION).document(iss["id"]).update(patch)
+                iss.update(patch)   # ctx 공유 목록도 갱신(판 생성이 같은 실행에서 digest를 본다)
                 updated += 1
         return {"success": True, "message": "digest 갱신", "data": {"scanned": scanned, "updated": updated}}
 

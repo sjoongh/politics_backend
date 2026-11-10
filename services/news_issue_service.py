@@ -161,7 +161,7 @@ class NewsIssueService:
             return {"success": False, "message": "뉴스 이슈 생성 실패"}
 
 
-    async def summarize_pending_issues(self, limit: int = 10) -> dict:
+    async def summarize_pending_issues(self, limit: int = 10, ctx=None) -> dict:
         """자동 이슈의 요약을 AI 사건요약으로(예산 안에서). 대상: 미요약이거나 근거가 크게 바뀐 이슈.
         예산 거부(budget)·쿼터(http_429)가 나오면 즉시 중단한다."""
         import asyncio
@@ -185,6 +185,8 @@ class NewsIssueService:
                        reverse=True)
             done = 0
             stop = None
+            if ctx is not None:
+                autos = [a for a in autos if a["id"] in set(ctx.changed_issue_ids)] or autos
             for iss in autos[:limit]:
                 ids = (iss.get("article_ids") or [])[:8]
                 refs = [db.collection("articles").document(a) for a in ids]

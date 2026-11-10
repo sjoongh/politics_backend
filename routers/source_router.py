@@ -32,17 +32,8 @@ async def _run_pipeline():
         except ValueError:
             pass
     lock.set({"at": datetime.now(timezone.utc).isoformat()})
-    print(await source_ingest_service.ingest_gov_policy())
-    print(await source_ingest_service.ingest_assembly_bills())
-    print(await source_ingest_service.ingest_assembly_votes())
-    print(await source_ingest_service.enrich_pending())
-    from services.issue_cluster_service import issue_cluster_service
-    print(await issue_cluster_service.generate_bill_issues())  # 법안 기준 이슈 자동생성(링크 전)
-    print(await source_link_service.link_unlinked())
-    print(await source_link_service.crosslink())               # gov/news 교차연결(4단 패널 채움)
-    from services.news_issue_service import news_issue_service
-    print(await news_issue_service.generate_news_issues())      # 뉴스 기반 현안 이슈 생성
-    print(await news_issue_service.summarize_pending_issues())  # 자동 이슈 AI 사건요약
+    from scripts.run_pipeline import run_pipeline
+    await run_pipeline(heavy=True)
 
 
 @router.get("", response_model=ResponseModel)

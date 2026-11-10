@@ -12,13 +12,26 @@ def _now():
 
 
 class SourceLinkService:
-    async def link_unlinked(self, limit: int = 200) -> dict:
+    async def link_unlinked(self, limit: int = 200, ctx=None) -> dict:
         """미연결(link_status='new') 소스를 이슈에 자동 연결하거나 검수 큐로."""
         try:
             # 문서 id 주입(필드에 id 없는 seed 데이터에서 KeyError 방지 — codex)
-            issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
+            issues = ctx.active_issues() if ctx else [
+                {**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+                if d.to_dict().get("active") is not False]
             n_auto = n_pending = 0
-            docs = db.collection("source_items").where("link_status", "==", "new").limit(limit).stream()
+            touched = []
+            if ctx:
+                class _Doc:  # ctx 소스를 doc처럼 다루는 얇은 어댑터
+                    def __init__(self, s):
+                        self.id = s["id"]
+                        self._s = s
+                        self.reference = db.collection("source_items").document(s["id"])
+                    def to_dict(self):
+                        return dict(self._s)
+                docs = [_Doc(s) for s in ctx.recent_sources(14) if s.get("link_status") == "new"][:limit]
+            else:
+                docs = db.collection("source_items").where("link_status", "==", "new").limit(limit).stream()
             for doc in docs:
                 s = doc.to_dict()
                 iss, score, status = best_issue(s, issues)
@@ -28,10 +41,14 @@ class SourceLinkService:
                                           "updated_at": _now()})
                     if status == "auto":
                         n_auto += 1
+                        touched.append(iss["id"])
+                        if ctx:
+                            ctx.mark_issue_changed(iss["id"])
                     else:
                         n_pending += 1
                 # 점수 미달은 'new' 유지(다음 이슈 생성 후 재시도 가능)
-            return {"success": True, "message": "연결 완료", "data": {"auto": n_auto, "pending": n_pending}}
+            return {"success": True, "message": "연결 완료",
+                    "data": {"auto": n_auto, "pending": n_pending, "issue_ids": list(dict.fromkeys(touched))}}
         except Exception as e:
             print(f"[link_unlinked] {e!r}")
             return {"success": False, "message": "연결 실패"}

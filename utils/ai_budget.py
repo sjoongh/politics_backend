@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
 DEFAULT_LIMIT = 18
-DEFAULT_PER_KIND = {"summary": 10, "enrich": 8, "stance": 0}
+DEFAULT_PER_KIND = {"summary": 10, "enrich": 8, "stance": 0, "article": 0, "daily": 1}
 
 
 def _env_int(name, default):
@@ -89,6 +89,7 @@ def budget() -> AiBudget:
         per_kind = dict(DEFAULT_PER_KIND)
         if os.getenv("STANCE_PRESS", "0").strip() in ("1", "true", "yes", "on"):
             per_kind["stance"] = 4
+        per_kind["article"] = _env_int("GEMINI_ARTICLE_CAP", 0)   # 기사별 AI 요약(기본 0: RSS 요약 저장)
         _BUDGET = AiBudget(limit=_env_int("GEMINI_DAILY_BUDGET", DEFAULT_LIMIT), today=today,
                            store=_FirestoreStore(f"ai_budget_{today}"), per_kind=per_kind)
     return _BUDGET
