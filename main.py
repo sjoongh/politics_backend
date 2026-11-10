@@ -62,6 +62,8 @@ app.include_router(notification_router.router, prefix="/api/notifications")
 app.include_router(politics_router.router, prefix="/api/politics")
 app.include_router(member_router.router, prefix="/api/members")
 app.include_router(issue_router.router, prefix="/api/issues")
+from routers import today_router
+app.include_router(today_router.router, prefix="/api/today")
 app.include_router(assembly_router.router, prefix="/api/assembly")
 app.include_router(source_router.router, prefix="/api/sources")
 app.include_router(statistic_router.router, prefix="/api/statistic")

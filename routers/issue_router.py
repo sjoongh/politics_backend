@@ -31,8 +31,8 @@ def get_issue(issue_id: str, response: Response):
     # 동기 Firestore 호출 → def 핸들러(스레드풀)로 이벤트 루프를 막지 않는다
     result = issue_service.get_detail(issue_id)
     if not result.get("success"):
-        response.headers.update(cache_headers(False))
-        raise HTTPException(status_code=404, detail=result.get("message", "이슈를 찾을 수 없습니다."))
+        raise HTTPException(status_code=404, detail=result.get("message", "이슈를 찾을 수 없습니다."),
+                            headers=cache_headers(False))
     response.headers.update(cache_headers(True))
     return result
 
@@ -40,9 +40,10 @@ def get_issue(issue_id: str, response: Response):
 @router.get("/{issue_id}/articles", response_model=ResponseModel)
 def list_issue_articles(issue_id: str, response: Response, cursor: Optional[str] = None, limit: int = 30):
     result = issue_service.list_articles(issue_id, cursor=cursor, limit=max(1, min(limit, 100)))
-    response.headers.update(cache_headers(result.get("success", False)))
     if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("message", "이슈를 찾을 수 없습니다."))
+        raise HTTPException(status_code=404, detail=result.get("message", "이슈를 찾을 수 없습니다."),
+                            headers=cache_headers(False))
+    response.headers.update(cache_headers(True))
     return result
 
 
