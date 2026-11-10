@@ -16,8 +16,14 @@ def _require_admin(x_admin_key: Optional[str]):
 
 
 @router.get("", response_model=ResponseModel)
-async def list_issues(status: Optional[str] = None, category: Optional[str] = None, limit: int = 20, offset: int = 0):
-    return await issue_service.list_summaries(status=status, category=category, limit=limit, offset=offset)
+def list_issues(response: Response, status: Optional[str] = None, category: Optional[str] = None,
+                limit: int = 20, offset: int = 0, v: Optional[int] = None, sort: str = "rank",
+                filter: Optional[str] = None, cursor: Optional[str] = None):
+    """v 없음: 구 응답(리스트). v=2: {items, next_cursor} + 서버 정렬(rank|updated|media)·필터·커서."""
+    result = issue_service.list_summaries(status=status, category=category, limit=limit, offset=offset,
+                                          v=v, sort=sort, filter=filter, cursor=cursor)
+    response.headers.update(cache_headers(result.get("success", False)))
+    return result
 
 
 @router.get("/{issue_id}", response_model=ResponseModel)

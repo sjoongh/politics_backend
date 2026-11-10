@@ -11,6 +11,7 @@ from utils.issue_merge_rules import follow_merge
 from utils.doc_order import order_by_ids
 from utils.cursor import encode_cursor, decode_cursor
 from utils.article_meta import attach_articles
+from utils.issue_list_query import build_query_plan
 
 COLLECTION = "issues"
 
@@ -39,23 +40,53 @@ class IssueService:
         return {"success": True, "message": "이슈 생성 성공", "data": data}
 
     @staticmethod
-    async def list_summaries(status=None, category=None, limit: int = 20, offset: int = 0) -> dict:
+    def list_summaries(status=None, category=None, limit: int = 20, offset: int = 0,
+                       v=None, sort: str = "rank", filter=None, cursor=None) -> dict:
+        if v == 2:
+            return IssueService._list_v2(sort=sort, filter_=filter, cursor=cursor, limit=limit)
         query = db.collection(COLLECTION)
         if status:
             query = query.where("status", "==", status)
         if category:
             query = query.where("category", "==", category)
-        # 사건성 점수 내림차순 정렬(수동 이슈는 미설정 → 상위 유지). 혼재 필드라 파이썬 정렬.
+        # (v1 호환) 사건성 점수 내림차순 정렬. 혼재 필드라 파이썬 정렬.
         docs = [{**doc.to_dict(), "id": doc.id} for doc in query.limit(200).stream()]
+        docs = [d for d in docs if d.get("active") is not False]
 
         def _rank(d):
-            # 수동(사람 큐레이션) 이슈는 최상단, 자동은 newsworthiness 순
             nw = d.get("newsworthiness")
             base = 1000 if not d.get("auto_generated") else (nw if nw is not None else 0)
             return (base, str(d.get("updated_at") or ""))
         docs.sort(key=_rank, reverse=True)
         items = [to_summary(d) for d in docs[offset:offset + limit]]
         return {"success": True, "message": "이슈 목록 조회 성공", "data": items}
+
+    @staticmethod
+    def _list_v2(sort: str, filter_, cursor, limit: int) -> dict:
+        """서버 정렬·단일 필터·커서 페이지네이션. 깨진 커서는 첫 페이지."""
+        from google.cloud import firestore as _fs
+        plan = build_query_plan(sort, filter_)
+        limit = max(1, min(int(limit or 50), 100))
+        q = db.collection(COLLECTION)
+        for f, op, val in plan["where"]:
+            q = q.where(f, op, val)
+        q = q.order_by(plan["order"], direction=_fs.Query.DESCENDING).order_by("__name__")
+        cur = decode_cursor(cursor)
+        if "k" in cur and "i" in cur:
+            q = q.start_after([cur["k"], cur["i"]])
+        snaps = list(q.limit(limit + 1).stream())
+        has_more = len(snaps) > limit
+        rows = [{**d.to_dict(), "id": d.id} for d in snaps[:limit]]
+        items = [to_summary(d) for d in rows]
+        nxt = None
+        if has_more and rows:
+            last = rows[-1]
+            key = last
+            for part in plan["order"].split("."):
+                key = (key or {}).get(part) if isinstance(key, dict) else None
+            nxt = encode_cursor({"k": key, "i": last["id"]})
+        return {"success": True, "message": "이슈 목록 조회 성공",
+                "data": {"items": items, "next_cursor": nxt, "sort": sort or "rank", "filter": filter_}}
 
     @staticmethod
     def resolve_issue_id(issue_id: str) -> str:

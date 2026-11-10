@@ -2,7 +2,8 @@
 
 서브커맨드:
   article-meta   article_ids → article_meta 채우고 article_ids를 날짜 역순으로 정렬
-  (digest / links / summary-flags 는 후속 작업에서 추가)
+  digest         모든 활성 이슈의 digest 재계산(press 제외), active 없는 문서에 active=True
+  (links / summary-flags 는 후속 작업에서 추가)
 
 실행: .venv/bin/python scripts/backfill_issues.py article-meta [--apply]
 """
@@ -63,14 +64,42 @@ def cmd_article_meta(apply: bool) -> int:
     return 0
 
 
+def cmd_digest(apply: bool) -> int:
+    from firebase.firebase_config import db
+    from services.issue_digest_service import issue_digest_service, _same_digest
+    from utils.issue_digest import build_digest
+    from datetime import datetime as _dt, timezone as _tz
+    issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+              if d.to_dict().get("active") is not False]
+    now = _dt.now(_tz.utc)
+    changed, backups = 0, []
+    for iss in issues:
+        sources = issue_digest_service._sources_for(iss["id"])
+        dg = build_digest(iss, sources, now, press_stance=[])
+        if not _same_digest(iss.get("digest"), dg) or iss.get("active") is None:
+            changed += 1
+            backups.append({"id": iss["id"], "digest": iss.get("digest"), "active": iss.get("active")})
+    print(f"issues={len(issues)} to_update={changed} (reads≈{len(issues) * 3})")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    path = dump_backup("digest", backups)
+    out = issue_digest_service.refresh(issue_ids=None, press=False)
+    print(f"applied={out['data']['updated']} backup={path}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("article-meta")
-    p.add_argument("--apply", action="store_true")
+    for name in ("article-meta", "digest"):
+        p = sub.add_parser(name)
+        p.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
     if args.cmd == "article-meta":
         return cmd_article_meta(args.apply)
+    if args.cmd == "digest":
+        return cmd_digest(args.apply)
     return 2
 
 
