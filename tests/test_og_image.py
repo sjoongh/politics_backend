@@ -63,3 +63,11 @@ def test_wrap_text_truncates_with_ellipsis_at_max_lines():
 def test_wrap_text_empty():
     font = _font("regular", 30)
     assert wrap_text("", font, max_width=400, max_lines=2) == []
+
+
+def test_default_card_is_served_from_cache():
+    from utils import og_image
+    og_image._render_cached.cache_clear()
+    render_og_image(title="", description="", kind="issue")
+    render_og_image(title=None, description=None, kind="issue")
+    assert og_image._render_cached.cache_info().hits >= 1

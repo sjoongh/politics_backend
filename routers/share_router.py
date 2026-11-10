@@ -8,10 +8,11 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Path, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from utils.og_image import OG_H, OG_W, render_og_image
+from utils.rate_limit import RateLimiter
 from utils.share_render import render_share_html
 
 router = APIRouter()
@@ -22,7 +23,7 @@ SHARE_BASE_URL = os.getenv("SHARE_BASE_URL", "https://politicsbackend-ruby.verce
 OG_DEFAULT_IMAGE = os.getenv("OG_DEFAULT_IMAGE", f"{WEB_APP_URL}/og-default.png")
 
 # 정상 응답: CDN 10분, 백그라운드 재검증 1일. 이미지는 바이트가 비싸므로 1일.
-CACHE_CONTROL = "public, s-maxage=600, stale-while-revalidate=86400"
+CACHE_CONTROL = "public, s-maxage=300, stale-while-revalidate=3600"
 IMAGE_CACHE_CONTROL = "public, s-maxage=86400, stale-while-revalidate=604800"
 # 일시 장애(Firestore 429 등): 캐시 금지 — 기본 카드가 하루 동안 고착되면 안 됨
 ERROR_CACHE_CONTROL = "no-store"
@@ -30,6 +31,22 @@ ERROR_CACHE_CONTROL = "no-store"
 # Firestore 문서 ID 형태만 허용(무작위 ID로 DB 조회/렌더 비용 유발 방지)
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,80}$"
 _ID_RE = re.compile(ID_PATTERN)
+
+# 형식에 맞는 임의 ID 난타(매번 Firestore 조회+렌더) 1차 방어. 크롤러 정상 사용량엔 넉넉.
+_og_limiter = RateLimiter(max_calls=60, window_sec=60)
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    return (xff.split(",")[0].strip() if xff else None) or (request.client.host if request.client else "?")
+
+
+def _rate_limited(request: Request):
+    """한도 초과 시 기본 이미지로 302(렌더/조회 비용 0). 아니면 None."""
+    if _og_limiter.allow(_client_ip(request)):
+        return None
+    return RedirectResponse(OG_DEFAULT_IMAGE, status_code=302,
+                            headers={"Cache-Control": ERROR_CACHE_CONTROL, "Retry-After": "60"})
 
 
 class FetchFailed:
@@ -111,7 +128,7 @@ def _png(kind: str, meta) -> Response:
 
 
 @router.get("/share/issue/{issue_id}")
-async def share_issue(issue_id: str = Path(..., pattern=ID_PATTERN)):
+def share_issue(issue_id: str = Path(..., pattern=ID_PATTERN)):
     return _html(
         "issue", issue_id, _fetch_issue_meta(issue_id),
         share_url=f"{SHARE_BASE_URL}/share/issue/{issue_id}",
@@ -120,7 +137,7 @@ async def share_issue(issue_id: str = Path(..., pattern=ID_PATTERN)):
 
 
 @router.get("/share/article/{article_id}")
-async def share_article(article_id: str = Path(..., pattern=ID_PATTERN)):
+def share_article(article_id: str = Path(..., pattern=ID_PATTERN)):
     return _html(
         "article", article_id, _fetch_article_meta(article_id),
         share_url=f"{SHARE_BASE_URL}/share/article/{article_id}",
@@ -129,10 +146,10 @@ async def share_article(article_id: str = Path(..., pattern=ID_PATTERN)):
 
 
 @router.get("/share/issue/{issue_id}/og.png")
-async def share_issue_og(issue_id: str = Path(..., pattern=ID_PATTERN)):
-    return _png("issue", _fetch_issue_meta(issue_id))
+def share_issue_og(request: Request, issue_id: str = Path(..., pattern=ID_PATTERN)):
+    return _rate_limited(request) or _png("issue", _fetch_issue_meta(issue_id))
 
 
 @router.get("/share/article/{article_id}/og.png")
-async def share_article_og(article_id: str = Path(..., pattern=ID_PATTERN)):
-    return _png("article", _fetch_article_meta(article_id))
+def share_article_og(request: Request, article_id: str = Path(..., pattern=ID_PATTERN)):
+    return _rate_limited(request) or _png("article", _fetch_article_meta(article_id))

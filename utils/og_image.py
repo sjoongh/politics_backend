@@ -7,7 +7,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 OG_W, OG_H = 1200, 630
 PAD = 80
@@ -47,15 +47,17 @@ def _font(weight: str, size: int) -> ImageFont.FreeTypeFont:
 
 @lru_cache(maxsize=1)
 def _background() -> Image.Image:
-    """대각 그라데이션 + 은은한 그리드 + 좌측 민트 액센트 바. 1회 생성 후 복사해 씀."""
-    grad = Image.new("RGB", (OG_W, OG_H))
-    px = grad.load()
-    denom = float(OG_W + OG_H)
+    """대각 그라데이션 + 은은한 그리드 + 좌측 민트 액센트 바. 1회 생성 후 복사해 씀.
+
+    픽셀 루프 대신 1×(W+H) 램프를 행마다 한 칸씩 밀어 붙여(행 630회 paste) 대각 그라데이션을 만든다.
+    """
+    ramp_w = OG_W + OG_H
+    ramp = Image.new("L", (ramp_w, 1))
+    ramp.putdata([int(255 * i / (ramp_w - 1)) for i in range(ramp_w)])
+    gray = Image.new("L", (OG_W, OG_H))
     for y in range(OG_H):
-        for x in range(OG_W):
-            t = (x + y) / denom
-            px[x, y] = tuple(int(a + (b - a) * t) for a, b in zip(C_BG_A, C_BG_B))
-    img = grad.convert("RGBA")
+        gray.paste(ramp.crop((y, 0, y + OG_W, 1)), (0, y))
+    img = ImageOps.colorize(gray, black=C_BG_A, white=C_BG_B).convert("RGBA")
     overlay = Image.new("RGBA", (OG_W, OG_H), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
     for x in range(0, OG_W, 60):
@@ -133,10 +135,18 @@ def _remaining(text: str, lines: list) -> bool:
 
 
 def render_og_image(*, title, description, kind) -> bytes:
-    """1200×630 PNG 바이트. 같은 입력 → 같은 바이트(캐시 친화)."""
-    label = KIND_LABELS.get(kind or "", DEFAULT_LABEL)
-    title = _clip(title, TITLE_MAX_CHARS) or DEFAULT_TITLE
-    desc = _clip(description, DESC_MAX_CHARS) or DEFAULT_DESC
+    """1200×630 PNG 바이트. 같은 입력 → 같은 바이트(캐시 친화).
+
+    동일 입력(특히 기본 카드)은 프로세스 내 LRU 로 재사용 — 없는 ID 난타로 매번 렌더되지 않게.
+    """
+    return _render_cached(_clip(title, TITLE_MAX_CHARS), _clip(description, DESC_MAX_CHARS), kind or "")
+
+
+@lru_cache(maxsize=64)
+def _render_cached(title: str, description: str, kind: str) -> bytes:
+    label = KIND_LABELS.get(kind, DEFAULT_LABEL)
+    title = title or DEFAULT_TITLE
+    desc = description or DEFAULT_DESC
 
     img = _background().copy()
     d = ImageDraw.Draw(img)

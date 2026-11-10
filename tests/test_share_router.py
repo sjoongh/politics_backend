@@ -89,3 +89,18 @@ def test_og_url_carries_content_version(monkeypatch):
                         lambda i: {"title": "t", "description": "d", "version": "deadbeef"})
     r = client.get("/share/issue/abc")
     assert "/share/issue/abc/og.png?v=deadbeef" in r.text
+
+
+def test_og_png_rate_limit_redirects_to_default(monkeypatch):
+    monkeypatch.setattr(sr, "_fetch_issue_meta", lambda i: None)
+    monkeypatch.setattr(sr, "_og_limiter", sr.RateLimiter(max_calls=2, window_sec=60))
+    assert client.get("/share/issue/a1/og.png").status_code == 200
+    assert client.get("/share/issue/a2/og.png").status_code == 200
+    r = client.get("/share/issue/a3/og.png", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == sr.OG_DEFAULT_IMAGE
+
+
+def test_handlers_are_sync_so_blocking_work_runs_in_threadpool():
+    import inspect
+    for fn in (sr.share_issue, sr.share_article, sr.share_issue_og, sr.share_article_og):
+        assert not inspect.iscoroutinefunction(fn)
