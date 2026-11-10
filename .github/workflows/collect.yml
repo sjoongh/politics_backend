@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: "0 * * * *"   # 매시(정치뉴스 속보성 위해 하루1회→시간별)
   workflow_dispatch: {}
+permissions:
+  contents: read
+  actions: write   # keepalive: 워크플로 재활성화 API 호출용
 jobs:
   collect:
     runs-on: ubuntu-latest
@@ -68,3 +71,10 @@ jobs:
               print(await ms.enrich_member_votes())
           asyncio.run(main())
           PY
+      # GitHub는 리포 60일 무활동 시 schedule 워크플로를 자동 비활성화(disabled_inactivity)한다.
+      # 매 실행 끝에 enable API를 호출해 타이머를 리셋한다(실패해도 수집 결과에는 영향 없음).
+      - name: Keepalive (reset 60-day inactivity timer)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/collect.yml/enable"

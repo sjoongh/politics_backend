@@ -1,0 +1,21 @@
+name: Keepalive
+# GitHub는 "60일간 저장소 활동 없음"이면 schedule 워크플로를 자동 비활성화한다(2026-10-12 실제 발생).
+# collect.yml의 enable API 호출은 공식 보장이 없으므로, 공식 기준에 확실히 맞는
+# 빈 커밋을 매월 1회 push해 저장소 활동을 만든다. (30일 < 60일이라 이 워크플로 자신도 살아남음)
+on:
+  schedule:
+    - cron: "0 3 1 * *"   # 매월 1일 03:00 UTC
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push empty keepalive commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore(keepalive): repo activity to keep scheduled workflows enabled [skip ci]"
+          git push
