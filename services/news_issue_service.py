@@ -10,6 +10,7 @@ from collections import Counter
 from firebase.firebase_config import db
 from utils.news_entities import extract_entities
 from utils.news_cluster import cluster_articles
+from utils.article_meta import attach_articles
 
 
 def _now():
@@ -85,8 +86,8 @@ class NewsIssueService:
 
                 if target:
                     ref = db.collection("issues").document(target)
-                    cur = set(ref.get().to_dict().get("article_ids") or [])
-                    ref.update({"article_ids": list(cur | set(c["article_ids"])), "updated_at": _now()})
+                    cur_doc = ref.get().to_dict() or {}
+                    ref.update({**attach_articles(cur_doc, members), "updated_at": _now()})
                     attached += 1
                     continue
 
@@ -112,15 +113,16 @@ class NewsIssueService:
                     "updated_at": _now(),
                 }
                 if exists:
-                    # article_ids는 합집합으로(과거 연결 기사 유실 방지 — codex)
-                    cur = set(ref.get().to_dict().get("article_ids") or [])
+                    # article_ids는 합집합으로(과거 연결 기사 유실 방지 — codex) + article_meta 갱신
+                    cur_doc = ref.get().to_dict() or {}
                     patch = {k: doc[k] for k in
                              ("title", "summary", "keywords", "newsworthiness", "updated_at")}
-                    patch["article_ids"] = list(cur | set(c["article_ids"]))
+                    patch.update(attach_articles(cur_doc, members))
                     ref.update(patch)
                     updated += 1
                 else:
                     doc.update({"started_at": _now(), "events": []})
+                    doc.update(attach_articles({"article_ids": []}, members))
                     ref.set(doc)
                     created += 1
 

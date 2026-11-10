@@ -10,6 +10,7 @@ from utils.source_bias import source_leaning, bias_breakdown
 from utils.issue_merge_rules import follow_merge
 from utils.doc_order import order_by_ids
 from utils.cursor import encode_cursor, decode_cursor
+from utils.article_meta import attach_articles
 
 COLLECTION = "issues"
 
@@ -190,11 +191,14 @@ class IssueService:
         snap = ref.get()
         if not snap.exists:
             return {"success": False, "message": "이슈를 찾을 수 없습니다."}
-        existing = list(snap.to_dict().get("article_ids", []))
-        for aid in (article_ids or []):
-            if aid not in existing:
-                existing.append(aid)
-        ref.update({"article_ids": existing, "updated_at": _now()})
+        cur = snap.to_dict()
+        new_ids = [a for a in (article_ids or []) if a not in set(cur.get("article_ids") or [])]
+        refs = [db.collection("articles").document(a) for a in new_ids]
+        found = [{**d.to_dict(), "id": d.id} for d in db.get_all(refs) if d.exists] if refs else []
+        patch = attach_articles(cur, found)
+        # 기사 문서가 없는 id도 연결은 보존(관리자 수동 연결 호환)
+        patch["article_ids"] += [a for a in new_ids if a not in set(patch["article_ids"])]
+        ref.update({**patch, "updated_at": _now()})
         return {"success": True, "message": "기사 연결 성공", "data": ref.get().to_dict()}
 
 

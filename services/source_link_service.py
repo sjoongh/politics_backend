@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from firebase.firebase_config import db
 from utils.issue_linker import best_issue
+from utils.article_meta import attach_articles
 
 
 def _now():
@@ -68,7 +69,7 @@ class SourceLinkService:
         try:
             from google.cloud import firestore as _fs
             issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
-            arts = [d.to_dict() for d in db.collection("articles")
+            arts = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
                     .order_by("published_at", direction=_fs.Query.DESCENDING)
                     .limit(scan_articles).stream()]
             govs = [{**d.to_dict(), "_ref": d.reference} for d in
@@ -90,18 +91,19 @@ class SourceLinkService:
 
                 # 뉴스 매칭 → article_ids 추가
                 existing = set(iss.get("article_ids") or [])
-                add_ids = []
+                add = []
                 for a in arts:
                     aid = a.get("id")
                     blob = (a.get("title", "") + " " + a.get("ai_summary", ""))
                     if aid and aid not in existing and any(t in blob for t in terms):
-                        add_ids.append(aid)
-                    if len(add_ids) >= 12:
+                        add.append(a)
+                    if len(add) >= 12:
                         break
-                if add_ids:
-                    db.collection("issues").document(iss["id"]).update(
-                        {"article_ids": list(existing | set(add_ids)), "updated_at": _now()})
-                    news_linked += len(add_ids)
+                if add:
+                    patch = attach_articles(iss, add)
+                    db.collection("issues").document(iss["id"]).update({**patch, "updated_at": _now()})
+                    iss.update(patch)
+                    news_linked += len(add)
 
                 # 정부 소스 매칭 → issue 연결. 의안번호 일치=강함, 법률명(4+) 등장=보조.
                 # 한 번 연결된 gov는 로컬 상태도 갱신해 다른 이슈가 덮어쓰지 않게(codex).
