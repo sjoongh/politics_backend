@@ -1,7 +1,8 @@
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
+from utils.http_cache import cache_headers
 from models.model import MemberCreate, ResponseModel
 from services.member_service import member_service
 from utils.member_rules import has_missing_source
@@ -21,8 +22,9 @@ async def list_members(party: Optional[str] = None, limit: int = 20, offset: int
 
 
 @router.get("/{member_id}", response_model=ResponseModel)
-async def get_member(member_id: str):
-    result = await member_service.get_member(member_id)
+def get_member(member_id: str, response: Response):
+    result = member_service.get_member(member_id)
+    response.headers.update(cache_headers(result.get("success", False)))
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("message", "의원을 찾을 수 없습니다."))
     return result
