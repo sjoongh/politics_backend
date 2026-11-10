@@ -134,36 +134,52 @@ class NewsIssueService:
             return {"success": False, "message": "뉴스 이슈 생성 실패"}
 
 
-    async def summarize_pending_issues(self, limit: int = 6) -> dict:
-        """자동 이슈의 템플릿 요약을 AI 사건요약으로 교체(승격된 것만, throttle). 무료쿼터 보호."""
+    async def summarize_pending_issues(self, limit: int = 10) -> dict:
+        """자동 이슈의 요약을 AI 사건요약으로(예산 안에서). 대상: 미요약이거나 근거가 크게 바뀐 이슈.
+        예산 거부(budget)·쿼터(http_429)가 나오면 즉시 중단한다."""
         import asyncio
         from utils.gemini_rest import summarize_issue
         from utils.collect_config import ai_throttle_seconds
+        from utils.evidence_hash import evidence_hash
         try:
             throttle = ai_throttle_seconds()
-            autos = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
-                     if d.to_dict().get("auto_generated") and not d.to_dict().get("ai_summarized")]
-            # 사건성 높은 것부터
-            autos.sort(key=lambda x: x.get("newsworthiness", 0), reverse=True)
+            autos = []
+            for d in db.collection("issues").stream():
+                iss = {**d.to_dict(), "id": d.id}
+                if not iss.get("auto_generated") or iss.get("active") is False:
+                    continue
+                ids = iss.get("article_ids") or []
+                h = evidence_hash(ids)
+                if not iss.get("ai_summarized"):
+                    autos.append(iss)
+                elif h != iss.get("evidence_hash") and len(ids) >= int(iss.get("evidence_n") or 0) + 5:
+                    autos.append(iss)
+            autos.sort(key=lambda x: ((x.get("digest") or {}).get("rank") or x.get("newsworthiness") or 0),
+                       reverse=True)
             done = 0
+            stop = None
             for iss in autos[:limit]:
-                snippets = []
-                for aid in (iss.get("article_ids") or [])[:8]:
-                    adoc = db.collection("articles").document(aid).get()
-                    if adoc.exists:
-                        a = adoc.to_dict()
-                        snippets.append((a.get("title") or "") + " — " + (a.get("ai_summary") or "")[:120])
+                ids = (iss.get("article_ids") or [])[:8]
+                refs = [db.collection("articles").document(a) for a in ids]
+                arts = [a.to_dict() for a in db.get_all(refs) if a.exists] if refs else []
+                snippets = [(a.get("title") or "") + " — " + (a.get("ai_summary") or "")[:120] for a in arts]
                 if not snippets:
                     continue
                 summary, reason = await summarize_issue(iss.get("title"), snippets)
                 if not summary:
-                    continue  # 실패(쿼터 등) 시 마킹 안 함 → 다음 run 재시도
+                    if reason in ("budget", "http_429"):
+                        stop = reason
+                        break
+                    continue  # 일시 실패는 다음 run 재시도
                 db.collection("issues").document(iss["id"]).update(
-                    {"summary": summary, "ai_summarized": True, "updated_at": _now()})
+                    {"summary": summary, "ai_summarized": True,
+                     "evidence_hash": evidence_hash(iss.get("article_ids") or []),
+                     "evidence_n": len(iss.get("article_ids") or []), "updated_at": _now()})
                 done += 1
                 if throttle:
                     await asyncio.sleep(throttle)
-            return {"success": True, "message": "AI 사건요약", "data": {"summarized": done, "scanned": len(autos[:limit])}}
+            return {"success": True, "message": "AI 사건요약",
+                    "data": {"summarized": done, "scanned": len(autos[:limit]), "stopped": stop}}
         except Exception as e:
             print(f"[summarize_pending_issues] {e!r}")
             return {"success": False, "message": "AI 사건요약 실패"}
