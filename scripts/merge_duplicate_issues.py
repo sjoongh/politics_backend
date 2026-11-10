@@ -32,7 +32,7 @@ def _merged_doc(keep: dict, gone: dict) -> dict:
                                 + ((gone.get("entities") or {}).get("people") or [])))
     ent = {**(keep.get("entities") or {}), "people": people}
     return {"article_meta": meta, "article_ids": ordered + tail, "events": events, "keywords": kws,
-            "entities": ent, "updated_at": datetime.now(timezone.utc).isoformat()}
+            "entities": ent, "active": True, "updated_at": datetime.now(timezone.utc).isoformat()}
 
 
 def main(argv=None) -> int:
@@ -87,11 +87,19 @@ def main(argv=None) -> int:
                 if gone_id in (s.get("issue_ids") or []):
                     sp["issue_ids"] = list(dict.fromkeys([keep_id if i == gone_id else i for i in s["issue_ids"]]))
                 if s.get("links"):
-                    sp["links"] = [{**l, "issue_id": keep_id} if l.get("issue_id") == gone_id else l for l in s["links"]]
+                    seen_l, links = set(), []
+                    for l in [{**l, "issue_id": keep_id} if l.get("issue_id") == gone_id else l for l in s["links"]]:
+                        if l.get("issue_id") in seen_l:
+                            continue
+                        seen_l.add(l.get("issue_id"))
+                        links.append(l)
+                    sp["links"] = links
                 if sp:
                     d.reference.update(sp)
                     moved_sources += 1
-    print(f"merged={len(pairs)} sources_moved={moved_sources} backup={backup}")
+    from services.issue_digest_service import issue_digest_service
+    issue_digest_service.refresh(issue_ids=sorted({k for _, k in pairs}), press=False)
+    print(f"merged={len(pairs)} sources_moved={moved_sources} digest_refreshed={len({k for _, k in pairs})} backup={backup}")
     return 0
 
 

@@ -124,6 +124,8 @@ class IssueClusterService:
                     else:
                         doc.update({"started_at": _now(), "events": [], "article_ids": [], "ai_summarized": False})
                         ref.set(doc)
+                        if ctx:
+                            ctx.active_issues().append(dict(doc))
                         created += 1
 
                 # 클러스터 소스들을 이슈에 연결(관리자 confirmed/rejected는 보존)

@@ -26,12 +26,10 @@ class IssueDigestService:
         if issue_ids is None:
             return [{**d.to_dict(), "id": d.id} for d in db.collection(COLLECTION).stream()
                     if d.to_dict().get("active") is not False]
-        out = []
-        for i in issue_ids:
-            snap = db.collection(COLLECTION).document(i).get()
-            if snap.exists:
-                out.append({**snap.to_dict(), "id": snap.id})
-        return out
+        refs = [db.collection(COLLECTION).document(i) for i in issue_ids]
+        if not refs:
+            return []
+        return [{**snap.to_dict(), "id": snap.id} for snap in db.get_all(refs) if snap.exists]
 
     @staticmethod
     def _sources_for(issue_id: str) -> list:
@@ -58,7 +56,11 @@ class IssueDigestService:
         if ctx is not None and issue_ids:
             wanted = set(issue_ids)
             issues = [i for i in ctx.active_issues() if i["id"] in wanted]
-            # ctx의 이슈는 파이프라인 중 갱신된 patch가 반영돼 있어 재조회 없이 쓴다
+            # ctx의 이슈는 파이프라인 중 갱신된 patch가 반영돼 있어 재조회 없이 쓴다.
+            # ctx 목록에 없는 id(이번 실행에서 새로 만든 문서 등)는 읽어서 포함한다(C1).
+            missing = sorted(wanted - {i["id"] for i in issues})
+            if missing:
+                issues += self._load_issues(missing)
         else:
             issues = self._load_issues(issue_ids)
         updated = scanned = 0

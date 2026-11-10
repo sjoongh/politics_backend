@@ -17,6 +17,10 @@ class WriteDB(FakeDB):
                     def update(self, patch):
                         db.updates.append((self.id, patch))
                         db.data[self.coll][self.id].update(patch)
+
+                    def set(self, doc):
+                        db.updates.append((self.id, doc))
+                        db.data.setdefault(self.coll, {})[self.id] = dict(doc)
                 return R(db, self.coll, _id)
         return Q(self, name)
 

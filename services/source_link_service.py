@@ -172,8 +172,10 @@ class SourceLinkService:
                           if d.to_dict().get("active") is not False
                           and str(d.to_dict().get("auto_key") or "").startswith("news:")]
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+                from google.cloud import firestore as _fs
                 sources = [{**d.to_dict(), "id": d.id} for d in db.collection("source_items")
-                           .where("published_at", ">=", cutoff).order_by("published_at").limit(limit).stream()]
+                           .where("published_at", ">=", cutoff)
+                           .order_by("published_at", direction=_fs.Query.DESCENDING).limit(limit).stream()]
             n_auto = n_pending = 0
             cands, touched = [], []
             for iss in issues:

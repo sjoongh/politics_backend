@@ -25,8 +25,10 @@ class EditionService:
                 sources = ctx.recent_sources(3)
             else:
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+                from google.cloud import firestore as _fs
                 sources = [{**d.to_dict(), "id": d.id} for d in db.collection("source_items")
-                           .where("published_at", ">=", cutoff).order_by("published_at").limit(400).stream()]
+                           .where("published_at", ">=", cutoff)
+                           .order_by("published_at", direction=_fs.Query.DESCENDING).limit(400).stream()]
         overview = None
         try:
             snap = db.collection("daily_summaries").document(date).get()

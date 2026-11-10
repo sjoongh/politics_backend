@@ -176,7 +176,9 @@ def cmd_prune_crosslink(apply: bool) -> int:
     path = dump_backup("prune-crosslink", backups)
     for iid, p_ in patches:
         db.collection("issues").document(iid).update(p_)
-    print(f"applied={len(patches)} backup={path}")
+    from services.issue_digest_service import issue_digest_service
+    issue_digest_service.refresh(issue_ids=[iid for iid, _ in patches], press=False)
+    print(f"applied={len(patches)} digest_refreshed={len(patches)} backup={path}")
     return 0
 
 

@@ -13,6 +13,7 @@ from utils.news_cluster import cluster_articles
 from utils.article_meta import attach_articles
 from utils.issue_merge import top_person, clean_title, should_merge
 from utils.fallback_summary import fallback_summary
+from utils.issue_merge_rules import follow_merge
 
 
 def _now():
@@ -102,6 +103,18 @@ class NewsIssueService:
                         target = iss
                         break
 
+                # 결정적 id 문서가 이미 흡수됐으면(merged_into) 생존 문서를 대상으로 삼는다(I6)
+                if target is None:
+                    from utils.news_entities import normalize_phrase as _np
+                    _topic = _np(rep) or "|".join(sorted(names)) or " ".join(sorted(c["phrase_tokens"])[:3])
+                    _did = f"issue_news_{hashlib.sha1(_topic.encode()).hexdigest()[:14]}"
+                    _snap = db.collection("issues").document(_did).get()
+                    if _snap.exists and (_snap.to_dict() or {}).get("merged_into"):
+                        _sid = follow_merge(_did, lambda i: (lambda s_: s_.to_dict() if s_.exists else None)(
+                            db.collection("issues").document(i).get()))
+                        if _sid != _did:
+                            target = next((i for i in existing if i["id"] == _sid), None) or {"id": _sid}
+
                 if target:
                     ref = db.collection("issues").document(target["id"])
                     cur_doc = ref.get().to_dict() or {}
@@ -111,6 +124,8 @@ class NewsIssueService:
                     ref.update(patch)
                     target.update(patch)
                     touched.append(target["id"])
+                    if ctx:
+                        ctx.mark_issue_changed(target["id"])
                     attached += 1
                     continue
 
@@ -152,6 +167,8 @@ class NewsIssueService:
                     existing.append(doc)
                     created += 1
                 touched.append(issue_id)
+                if ctx:
+                    ctx.mark_issue_changed(issue_id)
 
             return {"success": True, "message": "뉴스 현안 이슈 생성",
                     "data": {"clusters": len(clusters), "created": created,

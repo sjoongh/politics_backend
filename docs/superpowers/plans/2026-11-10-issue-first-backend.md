@@ -496,7 +496,7 @@ def test_build_edition_sections():
 - [ ] **Step 2: 1차 배포** — PR 머지 후 `cd politics_backend && vercel --prod --yes`. 확인: `curl -s -o /dev/null -w "%{http_code} %{time_total}\n" https://politicsbackend-ruby.vercel.app/api/issues/609c190844a5417c87695945e7bef25e` 2회(콜드·웜) 기록, 구 응답 필드 존재 확인(`source_panels.government`, `perspectives`, `articles`).
 - [ ] **Step 3: 인덱스 배포** — `firebase deploy --only firestore:indexes --project koreanpolitical` (빌드 완료까지 수 분, 콘솔 상태 확인).
 - [ ] **Step 4: backfill** — `backfill_issues.py article-meta --apply` → `links --apply` → `digest --apply` → `summary-flags --apply`(템플릿 요약 이슈 `ai_summarized=False`). 각 dry-run 수치와 apply 수치 대조.
-- [ ] **Step 5: 정제** — crosslink 규칙은 이미 배포됨. `merge_duplicate_issues.py --report` → **사용자에게 요약(쌍 수·예시 3개) 제시 → 확인 후** `--apply`. 자동 연결 표본 20건 보고 → 정밀도 ≥ 0.9이면 워크플로 env `LINK_NEWS_ISSUES=1`로 활성화(기본 비활성).
+- [ ] **Step 5: 정제** — `backfill_issues.py prune-crosslink`(dry-run → 사용자 확인 → `--apply`) → `merge_duplicate_issues.py --report` → **사용자에게 요약(쌍 수·예시 3개) 제시 → 확인 후** `--apply`. 두 스크립트는 끝에 대상 이슈 digest를 재계산한다. 자동 연결 표본 20건 보고 → 정밀도 ≥ 0.9이면 워크플로 env `LINK_NEWS_ISSUES=1`로 활성화(기본 비활성).
 - [ ] **Step 6: 2차 확인** — `GET /api/issues?v=2&sort=rank&limit=5` 200·`next_cursor`, `GET /api/today` 200, `GET /api/sources?type=assembly_vote` 200. 상세 웜·캐시 미스 5회 p50 ≤ 2초 기록. 상위 20 이슈 중 공식 기록 붙은 이슈 수 before/after 기록. **24시간 뒤 Firebase 콘솔 사용량에서 일일 읽기 수가 5만 미만인지 확인**해 기록.
 - [ ] **Step 7: 실행 기록을 이 문서 하단에 추가하고 커밋** `docs(plan): backend rollout record`
 

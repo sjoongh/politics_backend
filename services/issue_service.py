@@ -9,7 +9,7 @@ from utils.issue_rules import (
 from utils.source_bias import source_leaning, bias_breakdown
 from utils.issue_merge_rules import follow_merge
 from utils.doc_order import order_by_ids
-from utils.cursor import encode_cursor, decode_cursor
+from utils.cursor import encode_cursor, decode_cursor, valid_page_cursor
 from utils.article_meta import attach_articles
 from utils.issue_list_query import build_query_plan
 
@@ -35,7 +35,12 @@ class IssueService:
             "updated_at": now,
             "events": [],
             "article_ids": [],
+            "article_meta": {},
+            "active": True,
         }
+        from utils.issue_digest import build_digest
+        from datetime import timezone as _tz
+        data["digest"] = build_digest(data, [], datetime.now(_tz.utc))
         db.collection(COLLECTION).document(issue_id).set(data)
         return {"success": True, "message": "이슈 생성 성공", "data": data}
 
@@ -72,7 +77,7 @@ class IssueService:
             q = q.where(f, op, val)
         q = q.order_by(plan["order"], direction=_fs.Query.DESCENDING).order_by("__name__")
         cur = decode_cursor(cursor)
-        if "k" in cur and "i" in cur:
+        if valid_page_cursor(cur, "k"):
             q = q.start_after([cur["k"], cur["i"]])
         snaps = list(q.limit(limit + 1).stream())
         has_more = len(snaps) > limit
@@ -214,6 +219,7 @@ class IssueService:
         event = {**seed.dict(), "id": uuid.uuid4().hex}
         events = list(snap.to_dict().get("events", [])) + [event]
         ref.update({"events": events, "updated_at": _now()})
+        IssueService._refresh_digest(issue_id)
         return {"success": True, "message": "이벤트 추가 성공", "data": ref.get().to_dict()}
 
     @staticmethod
@@ -230,7 +236,16 @@ class IssueService:
         # 기사 문서가 없는 id도 연결은 보존(관리자 수동 연결 호환)
         patch["article_ids"] += [a for a in new_ids if a not in set(patch["article_ids"])]
         ref.update({**patch, "updated_at": _now()})
+        IssueService._refresh_digest(issue_id)
         return {"success": True, "message": "기사 연결 성공", "data": ref.get().to_dict()}
+
+    @staticmethod
+    def _refresh_digest(issue_id: str) -> None:
+        try:
+            from services.issue_digest_service import issue_digest_service
+            issue_digest_service.refresh(issue_ids=[issue_id], press=False)
+        except Exception as e:  # noqa: BLE001 — 관리자 쓰기 자체는 성공시킨다
+            print(f"[issue digest refresh] {e!r}")
 
 
 issue_service = IssueService()

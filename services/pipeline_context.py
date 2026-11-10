@@ -56,8 +56,10 @@ def firestore_context(db) -> PipelineContext:
 
     def ls(days):
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        # 최신순으로 읽어 상한(600)에 걸려도 최신 소스가 남는다(I1)
         return [{**d.to_dict(), "id": d.id} for d in db.collection("source_items")
-                .where("published_at", ">=", cutoff).order_by("published_at").limit(600).stream()]
+                .where("published_at", ">=", cutoff)
+                .order_by("published_at", direction=_fs.Query.DESCENDING).limit(600).stream()]
 
     def ln():
         # _meta/member_names 캐시(7일) → 없거나 오래되면 전수 스캔 후 갱신. 300 읽기 → 1 읽기.

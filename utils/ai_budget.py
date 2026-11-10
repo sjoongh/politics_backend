@@ -26,23 +26,30 @@ class AiBudget:
         self.store = store
         self.per_kind = dict(DEFAULT_PER_KIND if per_kind is None else per_kind)
 
-    def _state(self) -> dict:
-        st = self.store.get() or {}
+    def _state(self):
+        """저장소 상태. 읽기 실패는 None(= 거부). 하드 쿼터라 장애 시 열어두지 않는다."""
+        try:
+            st = self.store.get() or {}
+        except Exception:  # noqa: BLE001
+            return None
         if st.get("date") != self.today:
             st = {"date": self.today, "used": 0, "by_kind": {}, "exhausted": False}
         st.setdefault("by_kind", {})
         return st
 
     def used(self) -> int:
-        return int(self._state().get("used", 0))
+        st = self._state()
+        return int(st.get("used", 0)) if st else 0
 
     def try_acquire(self, kind: str, n: int = 1) -> bool:
+        cap = self.per_kind.get(kind)
+        if cap is not None and cap < n:
+            return False            # 상한 0인 종류는 저장소를 읽지 않고 거부(매시 기사 수집 경로)
         st = self._state()
-        if st.get("exhausted"):
+        if st is None or st.get("exhausted"):
             return False
         if st["used"] + n > self.limit:
             return False
-        cap = self.per_kind.get(kind)
         if cap is not None and st["by_kind"].get(kind, 0) + n > cap:
             return False
         st["used"] += n
@@ -51,9 +58,12 @@ class AiBudget:
         return True
 
     def mark_exhausted(self) -> None:
-        st = self._state()
+        st = self._state() or {"date": self.today, "used": 0, "by_kind": {}}
         st["exhausted"] = True
-        self.store.set(st)
+        try:
+            self.store.set(st)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class _FirestoreStore:
@@ -65,11 +75,8 @@ class _FirestoreStore:
         return db.collection("_meta").document(self.doc_id)
 
     def get(self) -> dict:
-        try:
-            snap = self._ref().get()
-            return snap.to_dict() or {} if snap.exists else {}
-        except Exception:  # noqa: BLE001 — 예산 조회 실패는 호출 거부가 아니라 빈 상태로
-            return {}
+        snap = self._ref().get()          # 실패는 AiBudget._state()가 None(거부)으로 처리
+        return snap.to_dict() or {} if snap.exists else {}
 
     def set(self, v: dict) -> None:
         try:

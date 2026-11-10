@@ -1,6 +1,6 @@
 """공개 소스 목록(둘러보기): 유형별 published_at 역순 커서 페이지. 표시 필드만 내보낸다."""
 from firebase.firebase_config import db
-from utils.cursor import encode_cursor, decode_cursor
+from utils.cursor import encode_cursor, decode_cursor, valid_page_cursor
 
 TYPES = ("assembly_vote", "assembly_bill", "gov_policy")
 PUBLIC_KEYS = ("id", "type", "title", "law_name", "published_at", "procedural", "url")
@@ -26,7 +26,7 @@ class SourceListService:
         q = (db.collection("source_items").where("type", "==", type_)
              .order_by("published_at", direction=_fs.Query.DESCENDING).order_by("__name__"))
         cur = decode_cursor(cursor)
-        if "p" in cur and "i" in cur:
+        if valid_page_cursor(cur, "p"):
             q = q.start_after([cur["p"], cur["i"]])
         snaps = list(q.limit(limit + 1).stream())
         rows = [{**d.to_dict(), "id": d.id} for d in snaps[:limit]]
