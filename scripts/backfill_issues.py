@@ -4,7 +4,8 @@
   article-meta   article_ids → article_meta 채우고 article_ids를 날짜 역순으로 정렬
   digest         모든 활성 이슈의 digest 재계산(press 제외), active 없는 문서에 active=True
   summary-flags  템플릿 요약("여러 매체가 보도한 현안입니다"/"…1차 소스를 묶은 이슈입니다")을 규칙 기반 대체 요약으로 교체, ai_summarized=False
-  (links 는 후속 작업에서 추가)
+  links          source_items의 issue_id/link_status → links[]·issue_ids 변환(변경 문서만)
+  prune-crosslink 뉴스 이슈에서 인용구 규칙에 안 맞는 기사 연결 제거(인명 단독 오염 정정)
 
 실행: .venv/bin/python scripts/backfill_issues.py article-meta [--apply]
 """
@@ -119,10 +120,70 @@ def cmd_summary_flags(apply: bool) -> int:
     return 0
 
 
+def cmd_links(apply: bool) -> int:
+    from firebase.firebase_config import db
+    from utils.source_links import add_link
+    docs = [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").stream()]
+    patches = []
+    for s_ in docs:
+        if s_.get("links") or not s_.get("issue_id") or s_.get("link_status") not in ("auto", "confirmed", "pending", "rejected"):
+            continue
+        ln = add_link(s_, s_["issue_id"], s_["link_status"], 0.0, "legacy", s_.get("updated_at") or "")
+        patches.append((s_["id"], {k: ln[k] for k in ("links", "issue_ids", "issue_id", "link_status")}))
+    print(f"sources={len(docs)} to_update={len(patches)} reads={len(docs)}")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    ids = {p_[0] for p_ in patches}
+    path = dump_backup("links", [d for d in docs if d["id"] in ids])
+    for sid, p_ in patches:
+        db.collection("source_items").document(sid).update(p_)
+    print(f"applied={len(patches)} backup={path}")
+    return 0
+
+
+def cmd_prune_crosslink(apply: bool) -> int:
+    from firebase.firebase_config import db
+    from utils.crosslink_match import article_matches_issue
+    from utils.article_meta import sorted_article_ids
+    issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+              if str(d.to_dict().get("auto_key") or "").startswith("news:") and d.to_dict().get("active") is not False]
+    need = sorted({a for i in issues for a in (i.get("article_ids") or [])})
+    arts = {}
+    for chunk in _chunks(need, 300):
+        for snap in db.get_all([db.collection("articles").document(a) for a in chunk]):
+            if snap.exists:
+                arts[snap.id] = snap.to_dict()
+    patches, backups, removed_total = [], [], 0
+    for iss in issues:
+        keep, drop = [], []
+        for aid in (iss.get("article_ids") or []):
+            a = arts.get(aid)
+            blob = ((a or {}).get("title") or "") + " " + ((a or {}).get("ai_summary") or "")
+            (keep if a is None or article_matches_issue(blob, iss, min_tokens=1) else drop).append(aid)
+        if drop:
+            keep_set = set(keep)
+            meta = {k: v for k, v in (iss.get("article_meta") or {}).items() if k in keep_set}
+            ordered = sorted_article_ids(meta) + [k for k in keep if k not in meta]
+            patches.append((iss["id"], {"article_ids": ordered, "article_meta": meta}))
+            backups.append({"id": iss["id"], "article_ids": iss.get("article_ids"), "article_meta": iss.get("article_meta")})
+            removed_total += len(drop)
+            print(f"  {iss.get('title')}: {len(iss.get('article_ids') or [])} → {len(keep)} (-{len(drop)})")
+    print(f"news_issues={len(issues)} to_update={len(patches)} removed_links={removed_total} reads={len(issues) + len(need)}")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    path = dump_backup("prune-crosslink", backups)
+    for iid, p_ in patches:
+        db.collection("issues").document(iid).update(p_)
+    print(f"applied={len(patches)} backup={path}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("article-meta", "digest", "summary-flags"):
+    for name in ("article-meta", "digest", "summary-flags", "links", "prune-crosslink"):
         p = sub.add_parser(name)
         p.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
@@ -132,6 +193,10 @@ def main(argv=None) -> int:
         return cmd_digest(args.apply)
     if args.cmd == "summary-flags":
         return cmd_summary_flags(args.apply)
+    if args.cmd == "links":
+        return cmd_links(args.apply)
+    if args.cmd == "prune-crosslink":
+        return cmd_prune_crosslink(args.apply)
     return 2
 
 

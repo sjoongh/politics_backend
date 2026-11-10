@@ -10,6 +10,7 @@ from firebase.firebase_config import db
 from utils.bill_cluster import cluster_by_bill
 from utils.newsworthiness import issue_score, vote_contention, PROMOTE
 from utils.fallback_summary import fallback_summary
+from utils.source_links import add_link, has_link
 
 
 def _now():
@@ -78,9 +79,13 @@ class IssueClusterService:
                         # 사건성 미달: 생성 보류. 기존 자동이슈가 있으면 정리(소스 미연결로 되돌림).
                         if exists:
                             ref.delete()
-                            for sid in c["item_ids"]:
-                                db.collection("source_items").document(sid).update(
-                                    {"issue_id": None, "link_status": "new"})
+                            for s_ in items:
+                                links = [l for l in (s_.get("links") or []) if l.get("issue_id") != ref.id]
+                                approved = [l["issue_id"] for l in links if l.get("status") in ("auto", "confirmed")]
+                                db.collection("source_items").document(s_["id"]).update(
+                                    {"links": links, "issue_ids": approved,
+                                     "issue_id": approved[0] if approved else None,
+                                     "link_status": "auto" if approved else "new"})
                         skipped += 1
                         continue
                     issue_id = ref.id
@@ -118,10 +123,14 @@ class IssueClusterService:
 
                 # 클러스터 소스들을 이슈에 연결(관리자 confirmed/rejected는 보존)
                 for s in items:
-                    if s.get("link_status") in ("confirmed", "rejected"):
+                    if s.get("link_status") in ("confirmed", "rejected") and not s.get("links"):
                         continue
+                    if has_link(s, issue_id):
+                        continue
+                    ln = add_link(s, issue_id, "auto", 12.0, "bill_cluster", _now())
                     db.collection("source_items").document(s["id"]).update(
-                        {"issue_id": issue_id, "link_status": "auto", "updated_at": _now()})
+                        {**{k: ln[k] for k in ("links", "issue_ids", "issue_id", "link_status")}, "updated_at": _now()})
+                    s.update(ln)
                     linked += 1
 
             return {"success": True, "message": "법안 이슈 자동생성",
