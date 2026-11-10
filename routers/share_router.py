@@ -66,6 +66,8 @@ def _fetch_issue_meta(issue_id: str):
     """Firestore에서 이슈 제목/요약만 읽음(뷰카운트 등 부작용 없음)."""
     try:
         from firebase.firebase_config import db
+        from services.issue_service import issue_service
+        issue_id = issue_service.resolve_issue_id(issue_id)
         doc = db.collection("issues").document(issue_id).get()
         if not doc.exists:
             return None

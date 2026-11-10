@@ -7,6 +7,7 @@ from utils.issue_rules import (
     is_valid_status, to_summary, sort_events, article_public, patchable,
 )
 from utils.source_bias import source_leaning, bias_breakdown
+from utils.issue_merge_rules import follow_merge
 
 COLLECTION = "issues"
 
@@ -54,7 +55,16 @@ class IssueService:
         return {"success": True, "message": "이슈 목록 조회 성공", "data": items}
 
     @staticmethod
+    def resolve_issue_id(issue_id: str) -> str:
+        """병합된 이슈면 남은 이슈 id로 해석(최대 3단, 순환 차단)."""
+        def _lookup(i):
+            snap = db.collection(COLLECTION).document(i).get()
+            return snap.to_dict() if snap.exists else None
+        return follow_merge(issue_id, _lookup)
+
+    @staticmethod
     async def get_detail(issue_id: str) -> dict:
+        issue_id = IssueService.resolve_issue_id(issue_id)
         doc = db.collection(COLLECTION).document(issue_id).get()
         if not doc.exists:
             return {"success": False, "message": "이슈를 찾을 수 없습니다."}
