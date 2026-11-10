@@ -20,7 +20,8 @@ def _js_string(s: str) -> str:
     return json.dumps(s or "").replace("<", "\\u003c")
 
 
-def render_share_html(*, title, description, image_url, share_url, redirect_url) -> str:
+def render_share_html(*, title, description, image_url, share_url, redirect_url,
+                      image_width=None, image_height=None) -> str:
     t = html.escape(_clip(title, TITLE_MAX) or DEFAULT_TITLE)
     d = html.escape(_clip(description, DESC_MAX) or DEFAULT_DESC)
     img = html.escape(image_url or "")
@@ -35,6 +36,10 @@ def render_share_html(*, title, description, image_url, share_url, redirect_url)
         f"<meta property=\"og:title\" content=\"{t}\">"
         f"<meta property=\"og:description\" content=\"{d}\">"
         f"<meta property=\"og:image\" content=\"{img}\">"
+        + (f"<meta property=\"og:image:width\" content=\"{int(image_width)}\">"
+           f"<meta property=\"og:image:height\" content=\"{int(image_height)}\">"
+           if image_width and image_height else "") +
+        f"<meta property=\"og:image:alt\" content=\"{t}\">"
         f"<meta property=\"og:url\" content=\"{su}\">"
         "<meta name=\"twitter:card\" content=\"summary_large_image\">"
         f"<meta name=\"twitter:title\" content=\"{t}\">"
