@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # 순수 로직 테스트는 외부 의존 없음 — 가벼운 의존만 설치
-      - run: pip install pytest python-dateutil httpx
+      # 라우터 테스트가 fastapi/pydantic을 쓰므로 런타임 의존 전체 설치(슬림 requirements)
+      - run: pip install -r requirements.txt pytest
       - name: Run pure-logic tests
-        run: pytest tests/ -q
+        run: python -m pytest tests/ -q
