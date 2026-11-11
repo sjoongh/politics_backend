@@ -166,7 +166,8 @@ def cmd_prune_crosslink(apply: bool) -> int:
             meta = {k: v for k, v in (iss.get("article_meta") or {}).items() if k in keep_set}
             ordered = sorted_article_ids(meta) + [k for k in keep if k not in meta]
             patches.append((iss["id"], {"article_ids": ordered, "article_meta": meta}))
-            backups.append({"id": iss["id"], "article_ids": iss.get("article_ids"), "article_meta": iss.get("article_meta")})
+            backups.append({"id": iss["id"], "article_ids": iss.get("article_ids"), "article_meta": iss.get("article_meta"),
+                            "digest": iss.get("digest")})
             removed_total += len(drop)
             print(f"  {iss.get('title')}: {len(iss.get('article_ids') or [])} → {len(keep)} (-{len(drop)})")
     print(f"news_issues={len(issues)} to_update={len(patches)} removed_links={removed_total} reads={len(issues) + len(need)}")
@@ -177,8 +178,11 @@ def cmd_prune_crosslink(apply: bool) -> int:
     for iid, p_ in patches:
         db.collection("issues").document(iid).update(p_)
     from services.issue_digest_service import issue_digest_service
-    issue_digest_service.refresh(issue_ids=[iid for iid, _ in patches], press=False)
-    print(f"applied={len(patches)} digest_refreshed={len(patches)} backup={path}")
+    # 이번에 바꾼 이슈 + 이전 실행이 중단돼 digest가 기사 수와 어긋난 이슈까지 재계산(재실행 복구)
+    stale = [i["id"] for i in issues if ((i.get("digest") or {}).get("counts") or {}).get("media") not in (None, len(i.get("article_meta") or {}))]
+    targets = sorted({iid for iid, _ in patches} | set(stale))
+    issue_digest_service.refresh(issue_ids=targets, press=False)
+    print(f"applied={len(patches)} digest_refreshed={len(targets)} backup={path}")
     return 0
 
 

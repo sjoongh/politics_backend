@@ -39,6 +39,8 @@ class SourceLinkService:
                     linked = add_link({**s, "id": doc.id}, iss["id"], status, score, "linker", _now())
                     doc.reference.update({**{k: linked[k] for k in ("links", "issue_ids", "issue_id", "link_status")},
                                           "updated_at": _now()})
+                    if hasattr(doc, "_s"):
+                        doc._s.update({k: linked[k] for k in ("links", "issue_ids", "issue_id", "link_status")})
                     if status == "auto":
                         n_auto += 1
                         touched.append(iss["id"])
@@ -98,7 +100,7 @@ class SourceLinkService:
             if ctx:
                 issues = ctx.active_issues()
                 arts = ctx.articles(scan_articles)
-                govs = [dict(g) for g in ctx.recent_sources(14) if g.get("type") == "gov_policy"]
+                govs = [g for g in ctx.recent_sources(14) if g.get("type") == "gov_policy"]   # 공유 객체(복사 금지)
             else:
                 issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
                           if d.to_dict().get("active") is not False]

@@ -52,6 +52,13 @@ def firestore_context(db) -> PipelineContext:
                 .order_by("published_at", direction=_fs.Query.DESCENDING).limit(limit).stream()]
 
     def li():
+        # 최근 30일 활동 이슈만(누적 이슈 수에 비례하지 않게). 오래된 이슈는 새 기사·소스 연결 대상이 아니다.
+        # digest가 아직 없는 배포 직후(backfill 전)에는 결과가 0이므로 전수 폴백.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        rows = [{**d.to_dict(), "id": d.id} for d in db.collection("issues")
+                .where("digest.last_activity_at", ">=", cutoff).stream()]
+        if rows:
+            return rows
         return [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
 
     def ls(days):

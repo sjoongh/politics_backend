@@ -64,43 +64,81 @@ def main(argv=None) -> int:
         print("\ndry-run (no writes). --apply to merge.")
         return 0
 
-    backup = dump_backup("merge-issues", [by_id[g] for g, _ in pairs] + [by_id[k] for _, k in pairs])
+    backup_docs = [by_id[g] for g, _ in pairs] + [by_id[k] for _, k in pairs]
+    backup_docs += [{"_source_item": True, **s_} for s_ in _sources_pointing(db, [g for g, _ in pairs])]
+    backup = dump_backup("merge-issues", backup_docs)
     moved_sources = 0
     for gone_id, keep_id in pairs:
-        keep, gone = by_id[keep_id], by_id[gone_id]
-        patch = _merged_doc(keep, gone)
-        db.collection("issues").document(keep_id).update(patch)
-        keep.update(patch)
-        db.collection("issues").document(gone_id).update(
-            {"merged_into": keep_id, "active": False, "updated_at": patch["updated_at"]})
-        seen = set()
-        for q in (db.collection("source_items").where("issue_id", "==", gone_id),
-                  db.collection("source_items").where("issue_ids", "array_contains", gone_id)):
+        moved_sources += apply_pair(db, by_id, gone_id, keep_id)
+    repaired = repair_orphans(db)
+    print(f"merged={len(pairs)} sources_moved={moved_sources} orphans_repaired={repaired} backup={backup}")
+    return 0
+
+
+def _sources_pointing(db, issue_ids):
+    seen, out = set(), []
+    for iid in issue_ids:
+        for q in (db.collection("source_items").where("issue_id", "==", iid),
+                  db.collection("source_items").where("issue_ids", "array_contains", iid)):
             for d in q.stream():
                 if d.id in seen:
                     continue
                 seen.add(d.id)
-                s = d.to_dict()
-                sp = {}
-                if s.get("issue_id") == gone_id:
-                    sp["issue_id"] = keep_id
-                if gone_id in (s.get("issue_ids") or []):
-                    sp["issue_ids"] = list(dict.fromkeys([keep_id if i == gone_id else i for i in s["issue_ids"]]))
-                if s.get("links"):
-                    seen_l, links = set(), []
-                    for l in [{**l, "issue_id": keep_id} if l.get("issue_id") == gone_id else l for l in s["links"]]:
-                        if l.get("issue_id") in seen_l:
-                            continue
-                        seen_l.add(l.get("issue_id"))
-                        links.append(l)
-                    sp["links"] = links
-                if sp:
-                    d.reference.update(sp)
-                    moved_sources += 1
+                out.append({**d.to_dict(), "id": d.id})
+    return out
+
+
+def _move_sources(db, gone_id, keep_id) -> int:
+    """gone_id를 가리키는 source_items를 keep_id로 치환(멱등). links는 issue_id 기준 중복 제거."""
+    moved = 0
+    for s_ in _sources_pointing(db, [gone_id]):
+        sp = {}
+        if s_.get("issue_id") == gone_id:
+            sp["issue_id"] = keep_id
+        if gone_id in (s_.get("issue_ids") or []):
+            sp["issue_ids"] = list(dict.fromkeys([keep_id if i == gone_id else i for i in s_["issue_ids"]]))
+        if s_.get("links"):
+            seen_l, links = set(), []
+            for l in [{**l, "issue_id": keep_id} if l.get("issue_id") == gone_id else l for l in s_["links"]]:
+                if l.get("issue_id") in seen_l:
+                    continue
+                seen_l.add(l.get("issue_id"))
+                links.append(l)
+            sp["links"] = links
+        if sp:
+            db.collection("source_items").document(s_["id"]).update(sp)
+            moved += 1
+    return moved
+
+
+def apply_pair(db, by_id, gone_id, keep_id) -> int:
+    """순서: 남는 문서 갱신 → 소스 이관 → digest 재계산 → 마지막에 흡수 문서 표시.
+    중간에 실패해도 흡수 문서가 아직 active라 재실행의 merge_plan이 다시 잡는다."""
     from services.issue_digest_service import issue_digest_service
-    issue_digest_service.refresh(issue_ids=sorted({k for _, k in pairs}), press=False)
-    print(f"merged={len(pairs)} sources_moved={moved_sources} digest_refreshed={len({k for _, k in pairs})} backup={backup}")
-    return 0
+    keep, gone = by_id[keep_id], by_id[gone_id]
+    patch = _merged_doc(keep, gone)
+    db.collection("issues").document(keep_id).update(patch)
+    keep.update(patch)
+    moved = _move_sources(db, gone_id, keep_id)
+    issue_digest_service.refresh(issue_ids=[keep_id], press=False)
+    db.collection("issues").document(gone_id).update(
+        {"merged_into": keep_id, "active": False, "updated_at": patch["updated_at"]})
+    return moved
+
+
+def repair_orphans(db) -> int:
+    """이미 merged_into가 있는데 소스가 아직 옛 id를 가리키면 이관을 마저 한다(중단된 이전 실행 복구)."""
+    from utils.issue_merge_rules import follow_merge
+    fixed = 0
+    merged = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").where("active", "==", False).stream()]
+    lookup = {m["id"]: m for m in merged}
+    for m in merged:
+        if not m.get("merged_into"):
+            continue
+        target = follow_merge(m["id"], lambda i: lookup.get(i) or (db.collection("issues").document(i).get().to_dict()))
+        if target != m["id"]:
+            fixed += _move_sources(db, m["id"], target)
+    return fixed
 
 
 if __name__ == "__main__":

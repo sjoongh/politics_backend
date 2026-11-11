@@ -41,10 +41,30 @@ class AiBudget:
         st = self._state()
         return int(st.get("used", 0)) if st else 0
 
+    def _reserve(self, st: dict, kind: str, n: int):
+        """상태 dict에 예약을 반영한 새 상태와 승인 여부(순수)."""
+        if st.get("date") != self.today:
+            st = {"date": self.today, "used": 0, "by_kind": {}, "exhausted": False}
+        st = {**st, "by_kind": dict(st.get("by_kind") or {})}
+        if st.get("exhausted") or st.get("used", 0) + n > self.limit:
+            return st, False
+        cap = self.per_kind.get(kind)
+        if cap is not None and st["by_kind"].get(kind, 0) + n > cap:
+            return st, False
+        st["used"] = st.get("used", 0) + n
+        st["by_kind"][kind] = st["by_kind"].get(kind, 0) + n
+        return st, True
+
     def try_acquire(self, kind: str, n: int = 1) -> bool:
         cap = self.per_kind.get(kind)
         if cap is not None and cap < n:
             return False            # 상한 0인 종류는 저장소를 읽지 않고 거부(매시 기사 수집 경로)
+        # 저장소가 원자적 갱신을 지원하면(운영: Firestore 트랜잭션) 검사와 증가를 한 번에. 실패는 거부.
+        if hasattr(self.store, "atomic"):
+            try:
+                return bool(self.store.atomic(lambda cur: self._reserve(cur or {}, kind, n)))
+            except Exception:  # noqa: BLE001
+                return False
         st = self._state()
         if st is None or st.get("exhausted"):
             return False
@@ -83,6 +103,22 @@ class _FirestoreStore:
             self._ref().set(v)
         except Exception:  # noqa: BLE001
             pass
+
+    def atomic(self, fn) -> bool:
+        """트랜잭션: 현재 상태를 읽고 fn(cur)->(new, ok); ok면 쓰기. 커밋 실패는 예외로 올린다(호출 측에서 거부)."""
+        from firebase.firebase_config import db
+        from google.cloud import firestore as _fs
+        ref = self._ref()
+
+        @_fs.transactional
+        def _run(tx):
+            snap = ref.get(transaction=tx)
+            cur = (snap.to_dict() or {}) if snap.exists else {}
+            new, ok = fn(cur)
+            if ok:
+                tx.set(ref, new)
+            return ok
+        return _run(db.transaction())
 
 
 _BUDGET = None

@@ -32,7 +32,7 @@ class IssueClusterService:
         try:
             # 법안 관련 소스만 스캔. ctx가 있으면 최근 30일 소스(공유 로더)만 — 읽기 예산.
             if ctx:
-                src = [dict(s) for s in ctx.recent_sources(30)
+                src = [s for s in ctx.recent_sources(30)        # 공유 객체(복사 금지): 뒤 단계가 갱신된 links를 본다
                        if s.get("type") in ("assembly_bill", "assembly_vote", "gov_policy")]
                 arts = ctx.articles(400)
             else:
@@ -87,10 +87,11 @@ class IssueClusterService:
                             for s_ in items:
                                 links = [l for l in (s_.get("links") or []) if l.get("issue_id") != ref.id]
                                 approved = [l["issue_id"] for l in links if l.get("status") in ("auto", "confirmed")]
-                                db.collection("source_items").document(s_["id"]).update(
-                                    {"links": links, "issue_ids": approved,
-                                     "issue_id": approved[0] if approved else None,
-                                     "link_status": "auto" if approved else "new"})
+                                upd = {"links": links, "issue_ids": approved,
+                                       "issue_id": approved[0] if approved else None,
+                                       "link_status": "auto" if approved else "new"}
+                                db.collection("source_items").document(s_["id"]).update(upd)
+                                s_.update(upd)
                         skipped += 1
                         continue
                     issue_id = ref.id

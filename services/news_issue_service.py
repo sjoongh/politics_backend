@@ -188,8 +188,8 @@ class NewsIssueService:
         try:
             throttle = ai_throttle_seconds()
             autos = []
-            for d in db.collection("issues").stream():
-                iss = {**d.to_dict(), "id": d.id}
+            pool = ctx.active_issues() if ctx is not None else [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
+            for iss in pool:
                 if not iss.get("auto_generated") or iss.get("active") is False:
                     continue
                 ids = iss.get("article_ids") or []
