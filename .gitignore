@@ -193,3 +193,7 @@ serviceAccount*.json
 .vercel
 .env.*
 !.env.example
+
+# superpowers 작업 스크래치
+.superpowers/
+backups/

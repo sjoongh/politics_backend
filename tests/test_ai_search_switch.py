@@ -28,7 +28,7 @@ def test_parse_and_briefing_skip_gemini_when_off(monkeypatch):
 def test_parse_calls_gemini_when_on(monkeypatch):
     monkeypatch.setenv("AI_SEARCH_GEMINI", "1")
     called = []
-    async def fake(prompt, *, json_mode, timeout):
+    async def fake(prompt, *, json_mode, timeout, **kw):
         called.append(prompt)
         return '{"keywords": ["대주주"], "entities": [], "time_range_days": null}', None
     monkeypatch.setattr(g, "_generate", fake)

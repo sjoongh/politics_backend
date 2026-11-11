@@ -48,7 +48,7 @@ class MemberService:
         return {"success": True, "message": "의원 목록 조회 성공", "data": {"members": members, "count": len(members)}}
 
     @staticmethod
-    async def get_member(member_id: str) -> dict:
+    def get_member(member_id: str) -> dict:
         doc = db.collection(COLLECTION).document(member_id).get()
         if not doc.exists:
             return {"success": False, "message": "의원을 찾을 수 없습니다."}
@@ -56,7 +56,43 @@ class MemberService:
         m["id"] = doc.id
         m["criminal_records"] = confirmed_records(m.get("criminal_records"))  # 확정만 노출
         m["disclaimer"] = MEMBER_DISCLAIMER
+        m["votes"] = MemberService._votes_with_issues(m.get("votes") or [])
         return {"success": True, "message": "의원 상세 조회 성공", "data": {"member": m}}
+
+    @staticmethod
+    def _votes_with_issues(votes) -> list:
+        """표결에 issue_id 부착: 법안 이슈 존재 확인(get_all 1회) + 수동 이슈 우선(in 쿼리 1회)."""
+        from utils.member_issue_link import bill_issue_ids, attach_issue_ids
+        from utils.issue_merge_rules import follow_merge
+        ids = bill_issue_ids(votes)
+        if not ids:
+            return list(votes)
+        try:
+            refs = [db.collection("issues").document(i) for i in sorted(set(ids.values()))]
+            snaps = {d.id: d.to_dict() for d in db.get_all(refs) if d.exists}
+            existing = set()
+            for iid, data in snaps.items():
+                existing.add(follow_merge(iid, lambda i: snaps.get(i) if i in snaps else
+                                          (db.collection("issues").document(i).get().to_dict())))
+            # 결정적 id가 병합돼 다른 id로 바뀐 경우를 위해 매핑도 따라간다
+            resolved = {bid: follow_merge(iid, lambda i: snaps.get(i)) for bid, iid in ids.items()}
+            manual = {}
+            bids = list(ids.keys())[:30]
+            for d in db.collection("source_items").where("vote.bill_id", "in", bids).stream():
+                s = d.to_dict()
+                for l in (s.get("links") or []):
+                    tid = l.get("issue_id") or ""
+                    if l.get("status") in ("auto", "confirmed") and tid and not tid.startswith("issue_bill_"):
+                        manual.setdefault((s.get("vote") or {}).get("bill_id"), tid)
+            out = attach_issue_ids(votes, existing, manual)
+            for v in out:
+                bid = v.get("bill_id")
+                if v.get("issue_id") and bid in resolved and v["issue_id"] == ids.get(bid):
+                    v["issue_id"] = resolved[bid] if resolved[bid] in existing else v["issue_id"]
+            return out
+        except Exception as e:  # noqa: BLE001 — 연결 실패해도 의원 상세는 나가야 한다
+            print(f"[member votes issues] {e!r}")
+            return list(votes)
 
 
     @staticmethod

@@ -205,13 +205,19 @@ class NewsService:
                             content = body or summary
 
                             ai_result = await ai_summary_service.summarize_by_category(category_name, title, content)
-                            await asyncio.sleep(ai_throttle_seconds())
+                            if not ai_result.get("budget"):
+                                await asyncio.sleep(ai_throttle_seconds())
+                            summary_source = "ai"
                             if not ai_result["success"]:
-                                print(f"AI 요약 실패: {ai_result['message']}")
-                                continue
-                            # ai_summary = ai_result["data"]["summary"] if ai_result["success"] else ""
-                            
-                            ai_data = ai_result["data"]
+                                if category_name in ("정치", "정부"):
+                                    # 예산 없음/실패: 기사를 버리지 않고 RSS 요약으로 저장(무료 티어 운영)
+                                    ai_data = {"ai_summary": summary or (body or "")[:300]}
+                                    summary_source = "rss"
+                                else:
+                                    print(f"AI 요약 실패: {ai_result['message']}")
+                                    continue
+                            else:
+                                ai_data = ai_result["data"]
 
                             # 정책
                             if category_name == "정책":
@@ -254,6 +260,7 @@ class NewsService:
                                     "id": article_id,
                                     "title": title,
                                     "ai_summary": ai_data.get("ai_summary", ""),
+                                    "summary_source": summary_source,
                                     "source": source,
                                     "source_url": source_url,
                                     "image_url": image_url,
@@ -273,6 +280,7 @@ class NewsService:
                                     "id": article_id,
                                     "title": title,
                                     "ai_summary": ai_data.get("ai_summary", ""),
+                                    "summary_source": summary_source,
                                     "source": source,
                                     "source_url": source_url,
                                     "image_url": image_url,

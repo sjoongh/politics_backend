@@ -10,6 +10,10 @@ from collections import Counter
 from firebase.firebase_config import db
 from utils.news_entities import extract_entities
 from utils.news_cluster import cluster_articles
+from utils.article_meta import attach_articles
+from utils.issue_merge import top_person, clean_title, should_merge
+from utils.fallback_summary import fallback_summary
+from utils.issue_merge_rules import follow_merge
 
 
 def _now():
@@ -48,15 +52,20 @@ def _title(names, rep_phrase):
 
 
 class NewsIssueService:
-    async def generate_news_issues(self, days: int = 7, scan: int = 400) -> dict:
+    async def generate_news_issues(self, days: int = 7, scan: int = 400, ctx=None) -> dict:
+        """ctx(PipelineContext)가 있으면 기사·이슈·의원명을 공유 로더에서 받아 읽기를 아낀다."""
         try:
             from google.cloud import firestore as _fs
-            known = _member_names()
-            # 최근 기사 우선(라이브 현안 전제) + 문서 id 보강
-            raw = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
-                   .order_by("published_at", direction=_fs.Query.DESCENDING).limit(scan).stream()]
+            now_dt = datetime.now(timezone.utc)
+            known = ctx.member_names() if ctx else _member_names()
+            if ctx:
+                raw = ctx.articles(scan)
+            else:
+                raw = [{**d.to_dict(), "id": d.id} for d in db.collection("articles")
+                       .order_by("published_at", direction=_fs.Query.DESCENDING).limit(scan).stream()]
             arts = []
             for a in raw:
+                a = dict(a)
                 a["entities"] = extract_entities(a.get("title"), a.get("ai_summary"), known)
                 arts.append(a)
 
@@ -64,29 +73,59 @@ class NewsIssueService:
             by_id = {a["id"]: a for a in arts}
 
             created = updated = attached = 0
-            existing = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
+            touched = []
+            if ctx:
+                existing = ctx.active_issues()
+            else:
+                existing = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+                            if d.to_dict().get("active") is not False]
 
             for c in clusters:
                 members = [by_id[i] for i in c["article_ids"]]
                 rep = _rep_phrase(members)
                 names = c["names"]
                 ptoks = set(c["phrase_tokens"])
+                person = top_person(members) or (names[0] if names else None)
+                people = ([person] if person else []) + [n for n in names if n != person]
+                cluster = {"article_ids": set(c["article_ids"]), "person": person, "phrases": [rep] if rep else []}
 
-                # 기존 이슈(수동/법안)와 강한 겹침이면 거기에 기사 attach(중복 이슈 방지)
+                # 기존 이슈 대조: 수동/법안은 제목·키워드 겹침, 뉴스 이슈는 should_merge(오병합 방지 기준)
                 target = None
                 for iss in existing:
-                    if iss.get("auto_key", "").startswith("news:"):
+                    if str(iss.get("auto_key") or "").startswith("news:"):
+                        if should_merge(cluster, iss, now_dt):
+                            target = iss
+                            break
                         continue
                     hay = (iss.get("title", "") + " " + " ".join(iss.get("keywords") or []))
                     if (any(n in hay for n in names) and (ptoks & set(re.split(r"\s+", hay)))) \
                             or (rep and rep in hay):
-                        target = iss["id"]
+                        target = iss
                         break
 
+                # 결정적 id 문서가 이미 흡수됐으면(merged_into) 생존 문서를 대상으로 삼는다(I6)
+                if target is None:
+                    from utils.news_entities import normalize_phrase as _np
+                    _topic = _np(rep) or "|".join(sorted(names)) or " ".join(sorted(c["phrase_tokens"])[:3])
+                    _did = f"issue_news_{hashlib.sha1(_topic.encode()).hexdigest()[:14]}"
+                    _snap = db.collection("issues").document(_did).get()
+                    if _snap.exists and (_snap.to_dict() or {}).get("merged_into"):
+                        _sid = follow_merge(_did, lambda i: (lambda s_: s_.to_dict() if s_.exists else None)(
+                            db.collection("issues").document(i).get()))
+                        if _sid != _did:
+                            target = next((i for i in existing if i["id"] == _sid), None) or {"id": _sid}
+
                 if target:
-                    ref = db.collection("issues").document(target)
-                    cur = set(ref.get().to_dict().get("article_ids") or [])
-                    ref.update({"article_ids": list(cur | set(c["article_ids"])), "updated_at": _now()})
+                    ref = db.collection("issues").document(target["id"])
+                    cur_doc = ref.get().to_dict() or {}
+                    patch = {**attach_articles(cur_doc, members), "updated_at": _now()}
+                    if cur_doc.get("auto_generated") and not cur_doc.get("ai_summarized"):
+                        patch["summary"] = fallback_summary({**cur_doc, **patch}, by_id)
+                    ref.update(patch)
+                    target.update(patch)
+                    touched.append(target["id"])
+                    if ctx:
+                        ctx.mark_issue_changed(target["id"])
                     attached += 1
                     continue
 
@@ -96,72 +135,97 @@ class NewsIssueService:
                 key = hashlib.sha1(topic.encode()).hexdigest()[:14]
                 issue_id = f"issue_news_{key}"
                 ref = db.collection("issues").document(issue_id)
-                exists = ref.get().exists
+                snap = ref.get()
                 doc = {
                     "id": issue_id,
-                    "title": _title(names, rep),
-                    "summary": f"여러 매체가 보도한 현안입니다(관련 기사 {c['count']}건·출처 {c['sources']}곳).",
+                    "title": clean_title(person, rep),
                     "status": "진행중",
                     "category": "정치",
-                    "keywords": [k for k in ([rep] + names) if k][:6],
-                    "entities": {"bills": [], "parties": [], "people": names},
-                    "article_ids": c["article_ids"],
+                    "keywords": [k for k in ([rep] + people) if k][:6],
+                    "entities": {"bills": [], "parties": [], "people": people},
                     "newsworthiness": round(2 + c["count"] * 0.8 + c["sources"] * 0.6, 2),
                     "auto_generated": True,
                     "auto_key": f"news:{key}",
+                    "active": True,
                     "updated_at": _now(),
                 }
-                if exists:
-                    # article_ids는 합집합으로(과거 연결 기사 유실 방지 — codex)
-                    cur = set(ref.get().to_dict().get("article_ids") or [])
-                    patch = {k: doc[k] for k in
-                             ("title", "summary", "keywords", "newsworthiness", "updated_at")}
-                    patch["article_ids"] = list(cur | set(c["article_ids"]))
+                if snap.exists:
+                    cur_doc = snap.to_dict() or {}
+                    patch = {k: doc[k] for k in ("title", "keywords", "newsworthiness", "updated_at")}
+                    patch.update(attach_articles(cur_doc, members))
+                    if not cur_doc.get("ai_summarized"):
+                        patch["summary"] = fallback_summary({**cur_doc, **patch, "auto_key": doc["auto_key"]}, by_id)
+                    if cur_doc.get("active") is None:
+                        patch["active"] = True
                     ref.update(patch)
                     updated += 1
                 else:
-                    doc.update({"started_at": _now(), "events": []})
+                    doc.update({"started_at": _now(), "events": [], "ai_summarized": False})
+                    doc.update(attach_articles({"article_ids": []}, members))
+                    doc["summary"] = fallback_summary(doc, by_id)
                     ref.set(doc)
+                    existing.append(doc)
                     created += 1
+                touched.append(issue_id)
+                if ctx:
+                    ctx.mark_issue_changed(issue_id)
 
             return {"success": True, "message": "뉴스 현안 이슈 생성",
                     "data": {"clusters": len(clusters), "created": created,
-                             "updated": updated, "attached": attached}}
+                             "updated": updated, "attached": attached, "issue_ids": touched}}
         except Exception as e:
             print(f"[generate_news_issues] {e!r}")
             return {"success": False, "message": "뉴스 이슈 생성 실패"}
 
 
-    async def summarize_pending_issues(self, limit: int = 6) -> dict:
-        """자동 이슈의 템플릿 요약을 AI 사건요약으로 교체(승격된 것만, throttle). 무료쿼터 보호."""
+    async def summarize_pending_issues(self, limit: int = 10, ctx=None) -> dict:
+        """자동 이슈의 요약을 AI 사건요약으로(예산 안에서). 대상: 미요약이거나 근거가 크게 바뀐 이슈.
+        예산 거부(budget)·쿼터(http_429)가 나오면 즉시 중단한다."""
         import asyncio
         from utils.gemini_rest import summarize_issue
         from utils.collect_config import ai_throttle_seconds
+        from utils.evidence_hash import evidence_hash
         try:
             throttle = ai_throttle_seconds()
-            autos = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
-                     if d.to_dict().get("auto_generated") and not d.to_dict().get("ai_summarized")]
-            # 사건성 높은 것부터
-            autos.sort(key=lambda x: x.get("newsworthiness", 0), reverse=True)
+            autos = []
+            pool = ctx.active_issues() if ctx is not None else [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
+            for iss in pool:
+                if not iss.get("auto_generated") or iss.get("active") is False:
+                    continue
+                ids = iss.get("article_ids") or []
+                h = evidence_hash(ids)
+                if not iss.get("ai_summarized"):
+                    autos.append(iss)
+                elif h != iss.get("evidence_hash") and len(ids) >= int(iss.get("evidence_n") or 0) + 5:
+                    autos.append(iss)
+            autos.sort(key=lambda x: ((x.get("digest") or {}).get("rank") or x.get("newsworthiness") or 0),
+                       reverse=True)
             done = 0
+            stop = None
+            if ctx is not None:
+                autos = [a for a in autos if a["id"] in set(ctx.changed_issue_ids)] or autos
             for iss in autos[:limit]:
-                snippets = []
-                for aid in (iss.get("article_ids") or [])[:8]:
-                    adoc = db.collection("articles").document(aid).get()
-                    if adoc.exists:
-                        a = adoc.to_dict()
-                        snippets.append((a.get("title") or "") + " — " + (a.get("ai_summary") or "")[:120])
+                ids = (iss.get("article_ids") or [])[:8]
+                refs = [db.collection("articles").document(a) for a in ids]
+                arts = [a.to_dict() for a in db.get_all(refs) if a.exists] if refs else []
+                snippets = [(a.get("title") or "") + " — " + (a.get("ai_summary") or "")[:120] for a in arts]
                 if not snippets:
                     continue
                 summary, reason = await summarize_issue(iss.get("title"), snippets)
                 if not summary:
-                    continue  # 실패(쿼터 등) 시 마킹 안 함 → 다음 run 재시도
+                    if reason in ("budget", "http_429"):
+                        stop = reason
+                        break
+                    continue  # 일시 실패는 다음 run 재시도
                 db.collection("issues").document(iss["id"]).update(
-                    {"summary": summary, "ai_summarized": True, "updated_at": _now()})
+                    {"summary": summary, "ai_summarized": True,
+                     "evidence_hash": evidence_hash(iss.get("article_ids") or []),
+                     "evidence_n": len(iss.get("article_ids") or []), "updated_at": _now()})
                 done += 1
                 if throttle:
                     await asyncio.sleep(throttle)
-            return {"success": True, "message": "AI 사건요약", "data": {"summarized": done, "scanned": len(autos[:limit])}}
+            return {"success": True, "message": "AI 사건요약",
+                    "data": {"summarized": done, "scanned": len(autos[:limit]), "stopped": stop}}
         except Exception as e:
             print(f"[summarize_pending_issues] {e!r}")
             return {"success": False, "message": "AI 사건요약 실패"}

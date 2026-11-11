@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from firebase.firebase_config import db
 from utils.bill_cluster import cluster_by_bill
 from utils.newsworthiness import issue_score, vote_contention, PROMOTE
+from utils.fallback_summary import fallback_summary
+from utils.source_links import add_link, has_link
 
 
 def _now():
@@ -26,17 +28,22 @@ def _cluster_bill_set(items):
 
 
 class IssueClusterService:
-    async def generate_bill_issues(self, scan: int = 500) -> dict:
+    async def generate_bill_issues(self, scan: int = 500, ctx=None) -> dict:
         try:
-            # 법안 관련 소스만 스캔
-            src = []
-            for t in ("assembly_bill", "assembly_vote", "gov_policy"):
-                src += [d.to_dict() for d in
-                        db.collection("source_items").where("type", "==", t).limit(scan).stream()]
+            # 법안 관련 소스만 스캔. ctx가 있으면 최근 30일 소스(공유 로더)만 — 읽기 예산.
+            if ctx:
+                src = [s for s in ctx.recent_sources(30)        # 공유 객체(복사 금지): 뒤 단계가 갱신된 links를 본다
+                       if s.get("type") in ("assembly_bill", "assembly_vote", "gov_policy")]
+                arts = ctx.articles(400)
+            else:
+                src = []
+                for t in ("assembly_bill", "assembly_vote", "gov_policy"):
+                    src += [d.to_dict() for d in
+                            db.collection("source_items").where("type", "==", t).limit(scan).stream()]
+                # 기사 후보(법률명 매칭)로 생성 시점에도 뉴스 점수 반영(영구 보류 방지 — codex)
+                arts = [d.to_dict() for d in db.collection("articles").limit(300).stream()]
             clusters = cluster_by_bill(src)
-
-            # 기사 후보(법률명 매칭)로 생성 시점에도 뉴스 점수 반영(영구 보류 방지 — codex)
-            arts = [d.to_dict() for d in db.collection("articles").limit(300).stream()]
+            touched = []
 
             def _article_count(law_name):
                 if not law_name or len(law_name) < 3:
@@ -77,16 +84,20 @@ class IssueClusterService:
                         # 사건성 미달: 생성 보류. 기존 자동이슈가 있으면 정리(소스 미연결로 되돌림).
                         if exists:
                             ref.delete()
-                            for sid in c["item_ids"]:
-                                db.collection("source_items").document(sid).update(
-                                    {"issue_id": None, "link_status": "new"})
+                            for s_ in items:
+                                links = [l for l in (s_.get("links") or []) if l.get("issue_id") != ref.id]
+                                approved = [l["issue_id"] for l in links if l.get("status") in ("auto", "confirmed")]
+                                upd = {"links": links, "issue_ids": approved,
+                                       "issue_id": approved[0] if approved else None,
+                                       "link_status": "auto" if approved else "new"}
+                                db.collection("source_items").document(s_["id"]).update(upd)
+                                s_.update(upd)
                         skipped += 1
                         continue
                     issue_id = ref.id
                     doc = {
                         "id": issue_id,
                         "title": c["bill_name"],
-                        "summary": f"‘{law_name}’ 관련 정부·국회 1차 소스를 묶은 이슈입니다.",
                         "status": c["status"] or "진행중",
                         "category": "정치",
                         "keywords": [law_name],
@@ -96,29 +107,48 @@ class IssueClusterService:
                         "newsworthiness": score,
                         "auto_generated": True,
                         "auto_key": f"bill:{cbid}",
+                        "active": True,
                         "updated_at": _now(),
                     }
+                    doc["summary"] = fallback_summary(doc, {})
                     if exists:
-                        ref.update({k: doc[k] for k in
-                                    ("title", "summary", "status", "keywords",
-                                     "law_name", "procedural", "newsworthiness", "updated_at")})
+                        cur_doc = ref.get().to_dict() or {}
+                        patch = {k: doc[k] for k in
+                                 ("title", "status", "keywords", "law_name", "procedural",
+                                  "newsworthiness", "updated_at")}
+                        if not cur_doc.get("ai_summarized"):
+                            patch["summary"] = doc["summary"]
+                        if cur_doc.get("active") is None:
+                            patch["active"] = True
+                        ref.update(patch)
                         updated += 1
                     else:
-                        doc.update({"started_at": _now(), "events": [], "article_ids": []})
+                        doc.update({"started_at": _now(), "events": [], "article_ids": [], "ai_summarized": False})
                         ref.set(doc)
+                        if ctx:
+                            ctx.active_issues().append(dict(doc))
                         created += 1
 
                 # 클러스터 소스들을 이슈에 연결(관리자 confirmed/rejected는 보존)
                 for s in items:
-                    if s.get("link_status") in ("confirmed", "rejected"):
+                    if s.get("link_status") in ("confirmed", "rejected") and not s.get("links"):
                         continue
+                    if has_link(s, issue_id):
+                        continue
+                    ln = add_link(s, issue_id, "auto", 12.0, "bill_cluster", _now())
                     db.collection("source_items").document(s["id"]).update(
-                        {"issue_id": issue_id, "link_status": "auto", "updated_at": _now()})
+                        {**{k: ln[k] for k in ("links", "issue_ids", "issue_id", "link_status")}, "updated_at": _now()})
+                    s.update(ln)
                     linked += 1
+                if issue_id:
+                    touched.append(issue_id)
+                    if ctx:
+                        ctx.mark_issue_changed(issue_id)
 
             return {"success": True, "message": "법안 이슈 자동생성",
                     "data": {"clusters": len(clusters), "created": created,
-                             "updated": updated, "linked": linked, "skipped": skipped}}
+                             "updated": updated, "linked": linked, "skipped": skipped,
+                             "issue_ids": list(dict.fromkeys(touched))}}
         except Exception as e:
             print(f"[generate_bill_issues] {e!r}")
             return {"success": False, "message": "법안 이슈 자동생성 실패"}

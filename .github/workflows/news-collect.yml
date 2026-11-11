@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-collect.txt
-      - name: Run collection
+      - name: Run pipeline (news every run; sources/issues/digest when ≥3h since last heavy run; members daily)
         env:
           FIREBASE_TYPE: ${{ secrets.FIREBASE_TYPE }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
@@ -32,46 +32,10 @@ jobs:
           ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
           ASSEMBLY_AGE: "22"
           AI_THROTTLE_SEC: "2"
-        run: |
-          python -c "import asyncio; from services.news_service import news_service; print(asyncio.run(news_service.collect_news_from_rss()).get('message'))"
-      - name: Ingest primary sources (gov + assembly) + enrich + link
-        env:
-          FIREBASE_TYPE: ${{ secrets.FIREBASE_TYPE }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_PRIVATE_KEY_ID: ${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
-          FIREBASE_CLIENT_ID: ${{ secrets.FIREBASE_CLIENT_ID }}
-          FIREBASE_AUTH_URI: ${{ secrets.FIREBASE_AUTH_URI }}
-          FIREBASE_TOKEN_URI: ${{ secrets.FIREBASE_TOKEN_URI }}
-          FIREBASE_AUTH_PROVIDER_X509_CERT_URL: ${{ secrets.FIREBASE_AUTH_PROVIDER_X509_CERT_URL }}
-          FIREBASE_CLIENT_X509_CERT_URL: ${{ secrets.FIREBASE_CLIENT_X509_CERT_URL }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
-          ASSEMBLY_AGE: "22"
-          AI_THROTTLE_SEC: "2"
-        run: |
-          python - <<'PY'
-          import asyncio
-          from services.source_ingest_service import source_ingest_service as ing
-          from services.source_link_service import source_link_service as link
-          from services.issue_cluster_service import issue_cluster_service as cluster
-          async def main():
-              print(await ing.ingest_gov_policy())
-              print(await ing.ingest_assembly_bills())
-              print(await ing.ingest_assembly_votes())
-              print(await ing.enrich_pending())
-              print(await cluster.generate_bill_issues())
-              print(await link.link_unlinked())
-              print(await link.crosslink())
-              from services.news_issue_service import news_issue_service as nis
-              print(await nis.generate_news_issues())
-              print(await nis.summarize_pending_issues())
-              from services.member_service import member_service as ms
-              print(await ms.enrich_member_bills())
-              print(await ms.enrich_member_votes())
-          asyncio.run(main())
-          PY
+          GEMINI_DAILY_BUDGET: "18"
+          STANCE_PRESS: "0"
+          LINK_NEWS_ISSUES: "0"
+        run: python scripts/run_pipeline.py
       # GitHub는 리포 60일 무활동 시 schedule 워크플로를 자동 비활성화(disabled_inactivity)한다.
       # 매 실행 끝에 enable API를 호출해 타이머를 리셋한다(실패해도 수집 결과에는 영향 없음).
       - name: Keepalive (reset 60-day inactivity timer)

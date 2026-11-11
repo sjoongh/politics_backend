@@ -116,7 +116,7 @@ class SourceIngestService:
             return {"success": False, "message": "표결 수집 실패"}
 
 
-    async def enrich_pending(self, limit: int = 20) -> dict:
+    async def enrich_pending(self, limit: int = 20, ctx=None) -> dict:
         """요약이 비어있는 소스를 AI로 보강(요청경로 아닌 수집 배치). throttle 준수, 실패는 skip."""
         import asyncio
         from utils.gemini_rest import enrich_source
@@ -125,9 +125,19 @@ class SourceIngestService:
             throttle = ai_throttle_seconds()
             done = 0
             # 최신 항목 우선(오래된 실패건이 신규를 굶기지 않게 — codex). summary 비어있는 것만.
-            docs = (db.collection("source_items")
-                    .order_by("created_at", direction=firestore.Query.DESCENDING)
-                    .limit(200).stream())
+            if ctx:
+                class _Doc:
+                    def __init__(self, s):
+                        self._s = s
+                        self.reference = db.collection("source_items").document(s["id"])
+                    def to_dict(self):
+                        return dict(self._s)
+                recent = sorted(ctx.recent_sources(14), key=lambda s: str(s.get("created_at") or ""), reverse=True)
+                docs = [_Doc(s) for s in recent]
+            else:
+                docs = (db.collection("source_items")
+                        .order_by("created_at", direction=firestore.Query.DESCENDING)
+                        .limit(200).stream())
             targets = [d for d in docs if not (d.to_dict().get("summary"))][:limit]
             for d in targets:
                 s = d.to_dict()

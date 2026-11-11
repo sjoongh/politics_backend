@@ -2,9 +2,9 @@
 
 VALID_STATUS = {"진행중", "계류", "가결", "부결", "종결", "소강"}
 SUMMARY_KEYS = ("id", "slug", "title", "summary", "status", "category", "started_at", "updated_at",
-                "newsworthiness")
+                "newsworthiness", "digest")
 PATCHABLE_FIELDS = {"title", "summary", "status", "category", "slug", "keywords", "official_links"}
-ARTICLE_PUBLIC_KEYS = ("id", "title", "ai_summary", "source", "source_url", "image_url", "category", "published_at")
+ARTICLE_PUBLIC_KEYS = ("id", "title", "ai_summary", "summary_source", "source", "source_url", "image_url", "category", "published_at")
 
 
 def is_valid_status(status) -> bool:
