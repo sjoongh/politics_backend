@@ -1,7 +1,14 @@
 from fastapi.testclient import TestClient
 import routers.source_router as sr
-from main import app
+from fastapi import FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from common.exception_handlers import http_exception_handler
+import routers.source_router as _r
 
+# main은 import 시 다른 라우터가 Firebase를 초기화하므로, 대상 라우터만 담은 앱으로 테스트한다(CI 자격 증명 없음)
+app = FastAPI()
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.include_router(_r.router, prefix="/api/sources")
 client = TestClient(app)
 
 
