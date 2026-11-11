@@ -492,16 +492,30 @@ def test_build_edition_sections():
 
 **Files:** 없음(절차). 결과는 PR 설명과 `docs/superpowers/plans/2026-11-10-issue-first-backend.md` 하단 "실행 기록"에 남긴다.
 
-- [ ] **Step 1: 선행 확인** — 없음(무료 유지). 기존 `GOOGLE_API_KEY`를 그대로 쓴다. 배포 전 `GEMINI_DAILY_BUDGET=18`, `STANCE_PRESS=0`을 Vercel env와 GH 시크릿/워크플로 env에 반영.
-- [ ] **Step 2: 1차 배포** — PR 머지 후 `cd politics_backend && vercel --prod --yes`. 확인: `curl -s -o /dev/null -w "%{http_code} %{time_total}\n" https://politicsbackend-ruby.vercel.app/api/issues/609c190844a5417c87695945e7bef25e` 2회(콜드·웜) 기록, 구 응답 필드 존재 확인(`source_panels.government`, `perspectives`, `articles`).
+- [x] **Step 1: 선행 확인** — 없음(무료 유지). 기존 `GOOGLE_API_KEY`를 그대로 쓴다. 배포 전 `GEMINI_DAILY_BUDGET=18`, `STANCE_PRESS=0`을 Vercel env와 GH 시크릿/워크플로 env에 반영.
+- [x] **Step 2: 1차 배포** — PR 머지 후 `cd politics_backend && vercel --prod --yes`. 확인: `curl -s -o /dev/null -w "%{http_code} %{time_total}\n" https://politicsbackend-ruby.vercel.app/api/issues/609c190844a5417c87695945e7bef25e` 2회(콜드·웜) 기록, 구 응답 필드 존재 확인(`source_panels.government`, `perspectives`, `articles`).
 - [x] **Step 3: 인덱스 배포** — `firebase deploy --only firestore:indexes --project koreanpolitical --non-interactive` (2026-11-11 완료, 16개). firestore.indexes.json에는 주석 키를 두지 않는다(CLI가 거부).
-- [ ] **Step 4: backfill** — `backfill_issues.py article-meta --apply` → `links --apply` → `digest --apply` → `summary-flags --apply`(템플릿 요약 이슈 `ai_summarized=False`). 각 dry-run 수치와 apply 수치 대조.
-- [ ] **Step 5: 정제** — `backfill_issues.py prune-crosslink`(dry-run → 사용자 확인 → `--apply`) → `merge_duplicate_issues.py --report` → **사용자에게 요약(쌍 수·예시 3개) 제시 → 확인 후** `--apply`. 두 스크립트는 끝에 대상 이슈 digest를 재계산한다. 자동 연결 표본 20건 보고 → 정밀도 ≥ 0.9이면 워크플로 env `LINK_NEWS_ISSUES=1`로 활성화(기본 비활성).
-- [ ] **Step 6: 2차 확인** — `GET /api/issues?v=2&sort=rank&limit=5` 200·`next_cursor`, `GET /api/today` 200, `GET /api/sources?type=assembly_vote` 200. 상세 웜·캐시 미스 5회 p50 ≤ 2초 기록. 상위 20 이슈 중 공식 기록 붙은 이슈 수 before/after 기록. **24시간 뒤 Firebase 콘솔 사용량에서 일일 읽기 수가 5만 미만인지 확인**해 기록.
+- [x] **Step 4: backfill** — `backfill_issues.py article-meta --apply` → `links --apply` → `digest --apply` → `summary-flags --apply`(템플릿 요약 이슈 `ai_summarized=False`). 각 dry-run 수치와 apply 수치 대조.
+- [x] **Step 5: 정제** (병합 0쌍 미적용) — `backfill_issues.py prune-crosslink`(dry-run → 사용자 확인 → `--apply`) → `merge_duplicate_issues.py --report` → **사용자에게 요약(쌍 수·예시 3개) 제시 → 확인 후** `--apply`. 두 스크립트는 끝에 대상 이슈 digest를 재계산한다. 자동 연결 표본 20건 보고 → 정밀도 ≥ 0.9이면 워크플로 env `LINK_NEWS_ISSUES=1`로 활성화(기본 비활성).
+- [x] **Step 6: 2차 확인** (24h 읽기 확인 남음) — `GET /api/issues?v=2&sort=rank&limit=5` 200·`next_cursor`, `GET /api/today` 200, `GET /api/sources?type=assembly_vote` 200. 상세 웜·캐시 미스 5회 p50 ≤ 2초 기록. 상위 20 이슈 중 공식 기록 붙은 이슈 수 before/after 기록. **24시간 뒤 Firebase 콘솔 사용량에서 일일 읽기 수가 5만 미만인지 확인**해 기록.
 - [ ] **Step 7: 실행 기록을 이 문서 하단에 추가하고 커밋** `docs(plan): backend rollout record`
 
 ---
 
 ## 실행 기록
 
-(배포·backfill·병합 수치를 여기에 기록)
+2026-11-11 (KST)
+- 배포: PR #6 머지(510d040) → Vercel prod, `x-vercel-id: icn1` 확인. 인덱스 16개 배포(PR #7). 프론트 PR #1·#2·#3 머지, Firebase Hosting 배포, Android 1.2.0(vc14) 서명 AAB 생성(Play 업로드 미실행).
+- 머지 전 codex 리뷰: 차단 3(예산 경쟁, ctx 소스 덮어쓰기, 병합 재개 불가)·중요 3 처리, 무거운 단계 판정을 경과 시간 기준으로 변경(GitHub 스케줄 누락).
+- 17:05 Firestore 쿼터 리셋 후 backfill
+  | 단계 | 결과 |
+  |---|---|
+  | article-meta | 74 이슈 중 56 갱신, 기사 764, 누락 0, reads 838 |
+  | links | 3,233 소스 중 16 변환 |
+  | digest | 74 갱신 |
+  | summary-flags | 템플릿 요약 48 → 규칙 기반 요약 |
+  | prune-crosslink | 44 이슈에서 인명 단독 링크 2,980 제거(예: 장동혁 징계 169→23, 김민석 복지부 157→2), digest 44 재계산 |
+  | merge | **0쌍(미적용)** — 어제 2쌍은 digest 없을 때 updated_at(크론이 갱신) 기준이었고, 실제 마지막 기사 시각(8월)으로는 14일 규칙에 걸림. 사용자 판단 대기 |
+- 오늘 판 생성(top 1), 스냅샷 수동 갱신 2회(side-bf 세션 snapshots.yml).
+- 라이브 확인: `/api/issues?v=2` 200·digest 포함, `/api/today` 200, `/api/sources` 200, 이슈 상세 캐시 미스 5회 0.15~0.30s(이전 33s). 라이브 캡처에서 오늘 판·소스 줄·규칙 기반 요약 표시 확인.
+- 미완: LINK_NEWS_ISSUES 표본 검수(후보 3건뿐 → 비활성 유지), 24시간 뒤 Firestore 일일 읽기 확인.
