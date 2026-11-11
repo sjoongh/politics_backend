@@ -54,4 +54,25 @@ def test_choose_keeps_last_good_copy_when_fetch_fails():
 def test_wrap_records_request_and_time():
     w = wrap({"path": "/api/members", "params": {"limit": 400}}, {"success": True, "data": {}}, NOW)
     assert w == {"request": "/api/members?limit=400", "generated_at": NOW.isoformat(),
-                 "body": {"success": True, "data": {}}}
+                 "fresh_for_s": 3 * 3600, "body": {"success": True, "data": {}}}
+
+
+def test_wrap_tells_clients_how_long_the_file_stays_fresh():
+    hourly = wrap({"path": "/api/today", "params": {}, "every_h": 0}, {"success": True, "data": 1}, NOW)
+    daily = wrap({"path": "/api/members", "params": {"limit": 400}, "every_h": 24}, {"success": True, "data": 1}, NOW)
+    assert hourly["fresh_for_s"] == 3 * 3600       # 매시 수집 + 누락 여유
+    assert daily["fresh_for_s"] == 25 * 3600       # 갱신 주기 + 1시간
+
+
+def test_partial_export_never_deletes_a_deployed_file():
+    from utils.snapshot_plan import safe_to_deploy
+    allf = [s["file"] for s in SNAPSHOTS]
+    assert safe_to_deploy(allf, prev_manifest_status=200, prev_manifest={"files": {}})
+    # today.json이 배포돼 있었는데 이번에 못 만들었으면 배포하지 않는다(기존 Pages 유지)
+    missing_today = [f for f in allf if f != "today.json"]
+    assert not safe_to_deploy(missing_today, 200, {"files": {"today.json": {}}})
+    # 이전 manifest를 못 읽으면(네트워크) 하나라도 빠지면 배포하지 않는다
+    assert not safe_to_deploy(missing_today, 0, None)
+    # 처음 배포(manifest 404)면 일부만 있어도 배포한다
+    assert safe_to_deploy(missing_today, 404, None)
+    assert not safe_to_deploy([], 404, None)

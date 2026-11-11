@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.snapshot_plan import SNAPSHOTS, canonical_key, choose, is_due, valid_body  # noqa: E402
+from utils.snapshot_plan import SNAPSHOTS, canonical_key, choose, is_due, safe_to_deploy, valid_body  # noqa: E402
 
 API_BASE = os.getenv("SNAPSHOT_API_BASE", "https://politicsbackend-ruby.vercel.app")
 PAGES_BASE = os.getenv("SNAPSHOT_PAGES_BASE", "https://sjoongh.github.io/politics_backend")
@@ -41,6 +41,7 @@ def run(out_dir: str) -> int:
     now = datetime.now(timezone.utc)
     os.makedirs(os.path.join(out_dir, "v1"), exist_ok=True)
     manifest = {"generated_at": now.isoformat(), "files": {}}
+    prev_status, prev_manifest = _get_json(f"{PAGES_BASE}/v1/manifest.json?t={int(time.time())}", timeout=15)
     written = 0
     for entry in SNAPSHOTS:
         key = canonical_key(entry["path"], entry["params"])
@@ -70,7 +71,10 @@ def run(out_dir: str) -> int:
                 "<p>공개 데이터 스냅샷입니다. <a href=v1/manifest.json>manifest</a></p>")
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
     print(f"[snapshot] files={written}/{len(SNAPSHOTS)}")
-    return 0 if written else 1
+    if not safe_to_deploy(list(manifest["files"].keys()), prev_status, prev_manifest):
+        print(f"[snapshot] 이미 배포된 파일을 지우게 되므로 배포 생략(이전 manifest status={prev_status})")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

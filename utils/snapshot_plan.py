@@ -19,9 +19,30 @@ def canonical_key(path: str, params: dict) -> str:
     return path + ("?" + urlencode(items) if items else "")
 
 
+def fresh_for_s(entry: dict) -> int:
+    """클라이언트가 이 파일을 '신선'으로 볼 시간: 갱신 주기 + 1시간(최소 3시간 — 매시 수집 누락 여유)."""
+    return max(3, entry.get("every_h", 0) + 1) * 3600
+
+
 def wrap(entry: dict, body: dict, now: datetime) -> dict:
     return {"request": canonical_key(entry["path"], entry["params"]),
-            "generated_at": now.isoformat(), "body": body}
+            "generated_at": now.isoformat(), "fresh_for_s": fresh_for_s(entry), "body": body}
+
+
+def safe_to_deploy(written_files, prev_manifest_status: int, prev_manifest) -> bool:
+    """Pages 배포는 사이트 전체를 바꾼다. 이번에 못 만든 파일이 이미 배포돼 있었다면 지워지지 않게 배포를 건너뛴다.
+    이전 manifest를 못 읽으면(네트워크 오류) 하나라도 빠졌을 때 건너뛴다. 처음 배포(404)면 있는 것만 배포."""
+    written = set(written_files)
+    if not written:
+        return False
+    missing = {s["file"] for s in SNAPSHOTS} - written
+    if not missing:
+        return True
+    if prev_manifest_status == 404:
+        return True
+    if prev_manifest_status != 200 or not isinstance(prev_manifest, dict):
+        return False
+    return not (missing & set((prev_manifest.get("files") or {}).keys()))
 
 
 def _generated(prev):

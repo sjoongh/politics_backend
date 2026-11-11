@@ -232,3 +232,37 @@ def test_collect_stops_on_read_errors_without_ai_calls(monkeypatch):
     assert res["success"] and calls == []
     assert svc.read_errors == ns.READ_ERROR_BREAKER   # 첫 피드 안에서도 곧바로 멈춤
     assert len(fetched) == 1          # 첫 피드에서 멈추고 나머지 피드는 요청하지 않음
+
+
+def test_concurrent_misses_read_the_pool_once(monkeypatch):
+    import threading
+    import time as _t
+
+    class SlowDB(FakeDB):
+        def collection(self, name):
+            q = super().collection(name)
+            orig = q.stream
+
+            def slow_stream():
+                _t.sleep(0.05)
+                return orig()
+            q.stream = slow_stream
+            return q
+    db = SlowDB({"articles": _articles(10)})
+    monkeypatch.setattr(ns, "db", db)
+    ns.reset_recent_cache()
+    ts = [threading.Thread(target=ns.recent_articles) for _ in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(db.streams) == 1
+
+
+def test_member_list_is_cdn_cacheable(monkeypatch):
+    import routers.member_router as mr
+
+    async def _list(**k):
+        return {"success": True, "message": "", "data": {"members": [], "count": 0}}
+    monkeypatch.setattr(mr.member_service, "list_members", _list)
+    _, c = _client(mr, "/api/members")
+    r = c.get("/api/members?limit=400")
+    assert r.status_code == 200 and r.headers["cache-control"].startswith("public")

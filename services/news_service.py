@@ -12,6 +12,7 @@ import hashlib
 import re
 from services.ai_service import ai_summary_service
 import asyncio
+import threading
 import requests
 from utils.collect_config import ai_throttle_seconds
 from utils.article_fetch import fetch_article_text
@@ -27,6 +28,7 @@ from utils.ttl_cache import TTLCache
 # 호출마다 300건을 새로 읽던 것을 warm 인스턴스당 5분에 한 번으로 줄인다(Firestore 무료 읽기 보호).
 RECENT_POOL = 300
 _recent_cache = TTLCache(maxsize=1, ttl=300)
+_recent_lock = threading.Lock()   # 만료 순간 동시 요청이 각자 300건을 읽지 않게(한 번만 로드)
 
 
 def reset_recent_cache():
@@ -37,11 +39,14 @@ def recent_articles():
     """최근순 기사 RECENT_POOL건. 호출자마다 사본을 준다(개인화 사유 등 변형이 캐시에 새지 않게)."""
     rows = _recent_cache.get("recent")
     if rows is None:
-        docs = (db.collection("articles")
-                .order_by("published_at", direction=firestore.Query.DESCENDING)
-                .limit(RECENT_POOL).stream())
-        rows = [doc.to_dict() for doc in docs]
-        _recent_cache.set("recent", rows)
+        with _recent_lock:
+            rows = _recent_cache.get("recent")
+            if rows is None:
+                docs = (db.collection("articles")
+                        .order_by("published_at", direction=firestore.Query.DESCENDING)
+                        .limit(RECENT_POOL).stream())
+                rows = [doc.to_dict() for doc in docs]
+                _recent_cache.set("recent", rows)
     return [dict(r) for r in rows]
 
 READ_ERROR_BREAKER = 3   # 중복판정 읽기 오류가 이만큼 쌓이면 남은 피드는 다음 실행으로 미룬다
