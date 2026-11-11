@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements-collect.txt
-      - name: Run pipeline (news hourly; sources/issues/digest every 3h KST)
+      - name: Run pipeline (news every run; sources/issues/digest when ≥3h since last heavy run; members daily)
         env:
           FIREBASE_TYPE: ${{ secrets.FIREBASE_TYPE }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}

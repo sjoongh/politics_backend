@@ -1,6 +1,6 @@
 """수집 파이프라인 단일 진입점. GitHub Actions와 /api/sources/ingest가 같은 함수를 쓴다.
 
-가벼운 단계(뉴스 RSS 수집)는 매시, 무거운 단계는 KST 3시간마다. 모든 단계가 PipelineContext를
+가벼운 단계(뉴스 RSS 수집)는 매 실행, 무거운 단계는 마지막 실행 후 3시간 이상 지났을 때, 의원 보강은 KST 하루 1회. 모든 단계가 PipelineContext를
 공유해 기사·이슈·소스를 실행당 한 번만 읽고, 끝에 `[meter] reads=N writes=N gemini=N`을 남긴다.
 
 실행: python scripts/run_pipeline.py [--heavy] [--steps a,b,c]
@@ -27,6 +27,22 @@ async def run_pipeline(steps=None, heavy=None, daily=None) -> dict:
     meter.install()
     ctx = firestore_context(db)
     results = {}
+    # 무거운/일간 단계는 시계 시각이 아니라 _meta/pipeline_state의 마지막 실행 기록으로 판정(크론 누락 대비)
+    from datetime import timezone as _utc_tz
+    from utils.pipeline_steps import heavy_due, daily_due
+    now_utc = datetime.now(_utc_tz.utc)
+    state_ref = db.collection("_meta").document("pipeline_state")
+    state = {}
+    if steps is None and (heavy is None or daily is None):
+        try:
+            snap = state_ref.get()
+            state = (snap.to_dict() or {}) if snap.exists else {}
+        except Exception:  # noqa: BLE001 — 상태 조회 실패면 가벼운 단계만
+            state = {"_unreadable": True}
+    if heavy is None and steps is None:
+        heavy = False if state.get("_unreadable") else heavy_due(state.get("last_heavy_at"), now_utc)
+    if daily is None and steps is None:
+        daily = False if state.get("_unreadable") else daily_due(state.get("last_daily_date"), now_utc)
     plan = select_steps(datetime.now(KST).hour, heavy=heavy, only=steps, daily=daily)
     try:
         for step in plan:
@@ -38,6 +54,17 @@ async def run_pipeline(steps=None, heavy=None, daily=None) -> dict:
             after = meter.snapshot()
             print(f"[{step}] reads+={after['reads'] - before['reads']} writes+={after['writes'] - before['writes']} "
                   f"{str(results[step])[:300]}")
+        if steps is None:
+            patch = {}
+            if heavy:
+                patch["last_heavy_at"] = now_utc.isoformat()
+            if daily:
+                patch["last_daily_date"] = now_utc.astimezone(KST).strftime("%Y-%m-%d")
+            if patch:
+                try:
+                    state_ref.set(patch, merge=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[pipeline_state] {e!r}")
     finally:
         snap = meter.snapshot()
         meter.uninstall()
@@ -94,7 +121,7 @@ async def _run_step(step: str, ctx):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--heavy", action="store_true", help="무거운 단계를 시각과 무관하게 실행")
+    ap.add_argument("--heavy", action="store_true", help="무거운 단계를 마지막 실행 기록과 무관하게 실행")
     ap.add_argument("--daily", action="store_true", help="의원 보강(일 1회 단계)을 시각과 무관하게 실행")
     ap.add_argument("--steps", default=None, help="쉼표 구분 단계 목록만 실행")
     args = ap.parse_args(argv)
