@@ -1,5 +1,6 @@
 import os
-from fastapi import HTTPException, APIRouter, status, Depends, BackgroundTasks, Header, Query, Request
+from fastapi import HTTPException, APIRouter, status, Depends, BackgroundTasks, Header, Query, Request, Response
+from utils.http_cache import cache_headers, private_headers
 from utils.rate_limit import RateLimiter
 
 _ai_search_limiter = RateLimiter(max_calls=15, window_sec=60)  # IP당 분당 15회
@@ -24,6 +25,7 @@ def _require_admin(x_admin_key: Optional[str]):
 
 @router.get("/list", response_model=ResponseModel)
 async def get_news(
+    response: Response,
     category: Optional[str] = None,
     limit: int = 20,
     offset: int = 0
@@ -31,11 +33,13 @@ async def get_news(
     """뉴스 목록 조회"""
     result = await news_service.get_articles(category, limit, offset)
     if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"], headers=cache_headers(False))
+    response.headers.update(cache_headers(True))
     return result
 
 @router.get("/search", response_model=ResponseModel)
 async def search_news(
+    response: Response,
     q: str,
     category: Optional[str] = None,
     limit: int = 20
@@ -43,12 +47,14 @@ async def search_news(
     """뉴스 검색"""
     result = await news_service.search_articles(q, category, limit)
     if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"], headers=cache_headers(False))
+    response.headers.update(cache_headers(True))
     return result
 
 @router.get("/search/ai", response_model=ResponseModel)
 async def ai_search_news(
     request: Request,
+    response: Response,
     q: str = Query(..., min_length=1, max_length=200),
     include_briefing: bool = False,
     limit: int = Query(20, ge=1, le=50),
@@ -65,7 +71,9 @@ async def ai_search_news(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="검색어를 입력해 주세요.")
     result = await news_service.ai_search(query, include_briefing=include_briefing, limit=limit)
     if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"], headers=cache_headers(False))
+    # 같은 질의는 CDN이 응답 → Firestore 후보 읽기·Gemini 호출 모두 절약
+    response.headers.update(cache_headers(True))
     return result
 
 @router.post("/collect", response_model=ResponseModel)
@@ -79,13 +87,16 @@ async def collect_news(
     return {"success": True, "message": "뉴스 수집을 시작했습니다.", "data": {"status": "started"}}
 
 @router.get("/digest", response_model=ResponseModel)
-async def get_digest(interests: str = "", limit: int = 30):
-    """관심 키워드(쉼표구분)로 맞춤 기사 조회."""
+async def get_digest(response: Response, interests: str = "", limit: int = 30):
+    """관심 키워드(쉼표구분)로 맞춤 기사 조회. 키워드가 쿼리스트링이라 공개 캐시 가능."""
     items = [i for i in interests.split(",") if i.strip()]
-    return await news_service.get_digest(items, limit)
+    result = await news_service.get_digest(items, limit)
+    response.headers.update(cache_headers(result.get("success", False)))
+    return result
 
 @router.get("/foryou", response_model=ResponseModel)
 async def get_for_you(
+    response: Response,
     limit: int = Query(30, ge=1, le=50),
     current_user: Dict[str, Any] = Depends(auth_service.get_current_user),
 ):
@@ -96,13 +107,15 @@ async def get_for_you(
     result = await news_service.personalized_feed(
         uid, current_user.get("interests", []), limit=limit)
     if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"])
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=result["message"], headers=cache_headers(False))
+    response.headers.update(private_headers())   # 사용자별 응답 — 공유 캐시 금지
     return result
 
 @router.get("/{article_id}", response_model=ResponseModel)
-async def get_news_detail(article_id: str):
-    """뉴스 상세 조회"""
+async def get_news_detail(article_id: str, response: Response):
+    """뉴스 상세 조회. CDN 캐시 적중분은 view_count 증가가 빠진다(근사치 — 읽기·쓰기 예산 우선)."""
     result = await news_service.get_article_by_id(article_id)
     if not result["success"]:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["message"])
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result["message"], headers=cache_headers(False))
+    response.headers.update(cache_headers(True))
     return result

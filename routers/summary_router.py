@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from utils.http_cache import cache_headers
 from services.auth_service import auth_service
 from models.model import ResponseModel
 from services.ai_service import ai_summary_service
@@ -8,16 +9,18 @@ router = APIRouter()
 
 
 @router.get("/daily", response_model=ResponseModel)
-async def get_daily_summary(date: Optional[str] = None):
+async def get_daily_summary(response: Response, date: Optional[str] = None):
     """일일 뉴스 요약 조회"""
     result = await ai_summary_service.get_daily_summary(date)
 
     if not result["success"]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.get("message", "일일 요약 조회 실패")
+            detail=result.get("message", "일일 요약 조회 실패"),
+            headers=cache_headers(False),
         )
 
+    response.headers.update(cache_headers(True))
     return result
 
 

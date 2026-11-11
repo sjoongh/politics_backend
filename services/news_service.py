@@ -21,6 +21,31 @@ from utils.search_rank import rank_articles
 from utils.personalize import build_profile, pick_reason, diversify
 from models.model import President, ParliamentaryActivity, PoliticalStatement
 from dateutil import parser as dateparser
+from utils.ttl_cache import TTLCache
+
+# 공개 API(검색·AI검색·맞춤·다이제스트·목록 앞쪽 페이지)가 공유하는 최근 기사 후보.
+# 호출마다 300건을 새로 읽던 것을 warm 인스턴스당 5분에 한 번으로 줄인다(Firestore 무료 읽기 보호).
+RECENT_POOL = 300
+_recent_cache = TTLCache(maxsize=1, ttl=300)
+
+
+def reset_recent_cache():
+    _recent_cache.clear()
+
+
+def recent_articles():
+    """최근순 기사 RECENT_POOL건. 호출자마다 사본을 준다(개인화 사유 등 변형이 캐시에 새지 않게)."""
+    rows = _recent_cache.get("recent")
+    if rows is None:
+        docs = (db.collection("articles")
+                .order_by("published_at", direction=firestore.Query.DESCENDING)
+                .limit(RECENT_POOL).stream())
+        rows = [doc.to_dict() for doc in docs]
+        _recent_cache.set("recent", rows)
+    return [dict(r) for r in rows]
+
+READ_ERROR_BREAKER = 3   # 중복판정 읽기 오류가 이만큼 쌓이면 남은 피드는 다음 실행으로 미룬다
+
 
 class NewsService:
     def __init__(self):
@@ -169,9 +194,13 @@ class NewsService:
             collected_statements = []
 
             feeds_to_process = self.rss_feeds.items() if not category else [(category, self.rss_feeds.get(category, []))]
+            self.read_errors = 0
 
             for category_name, feed_urls in feeds_to_process:
                 for feed_url in feed_urls:
+                    if self.read_errors >= READ_ERROR_BREAKER:
+                        print(f"[collect] 읽기 오류 {self.read_errors}회 → 이번 수집 중단(쿼터 보호)")
+                        break
                     try:
                         # 일부 언론사는 기본 UA 차단 + 무한대기 방지 위해 UA·타임아웃 지정
                         response = requests.get(
@@ -184,6 +213,8 @@ class NewsService:
                             continue
 
                         for entry in feed.entries[:10]:
+                            if self.read_errors >= READ_ERROR_BREAKER:
+                                break
                             title = self._clean_text(entry.get('title', ''))
                             summary = self._clean_text(entry.get('summary', ''))[:300]
                             source_url = entry.get('link', '')
@@ -381,19 +412,32 @@ class NewsService:
             "정책": "parliamentary_activities",
         }.get(category_name, "articles")
 
+    read_errors = 0   # 이번 수집에서 난 읽기 오류 수(인스턴스 속성으로 덮어씀)
+
     async def _doc_exists(self, collection_name: str, doc_id: str) -> bool:
-        """지정 컬렉션에 문서 존재 여부."""
+        """지정 컬렉션에 문서 존재 여부. 읽기 실패(쿼터 429 등)면 '있음'으로 본다(fail-closed):
+        모르는 기사를 신규로 오인해 본문 크롤·AI 요약·재쓰기를 반복하는 폭주를 막는다."""
         try:
             return db.collection(collection_name).document(doc_id).get().exists
-        except Exception:
-            return False
+        except Exception as e:
+            self.read_errors = self.read_errors + 1
+            print(f"[dedupe] read failed ({collection_name}/{doc_id}): {e!r} → skip")
+            return True
 
     async def get_articles(self, 
                           category: Optional[str] = None, 
                           limit: int = 20, 
                           offset: int = 0) -> Dict[str, Any]:
-        """기사 목록 조회"""
+        """기사 목록 조회. 앞쪽 페이지는 공유 후보 풀에서 잘라 준다(offset 건너뛴 문서도 읽기로 과금됨)."""
         try:
+            if offset + limit <= RECENT_POOL:
+                pool = recent_articles()
+                rows = [a for a in pool if not category or a.get("category") == category]
+                # 카테고리로 걸러 모자라면(풀이 꽉 찬 경우) 아래 정식 쿼리로 넘어간다
+                if len(rows) >= offset + limit or len(pool) < RECENT_POOL:
+                    page = rows[offset:offset + limit]
+                    return {"success": True, "message": "뉴스 목록 조회 성공",
+                            "data": {"articles": page, "count": len(page)}}
             articles_ref = db.collection("articles")
 
             # 카테고리 필터
@@ -428,12 +472,7 @@ class NewsService:
         t0 = _time.monotonic()
         try:
             # 1) 후보 기사 로드(최근순). Firestore stream은 동기 I/O라 스레드로 오프로드.
-            def _load():
-                docs = (db.collection("articles")
-                        .order_by("published_at", direction=firestore.Query.DESCENDING)
-                        .limit(candidate_pool).stream())
-                return [doc.to_dict() for doc in docs]
-            candidates = await asyncio.to_thread(_load)
+            candidates = (await asyncio.to_thread(recent_articles))[:candidate_pool]
 
             # 2) Gemini 질의 구조화(실패 시 폴백)
             parsed, reason = await parse_query(query)
@@ -477,10 +516,7 @@ class NewsService:
         from datetime import datetime, timezone
         try:
             def _load_recent():
-                docs = (db.collection("articles")
-                        .order_by("published_at", direction=firestore.Query.DESCENDING)
-                        .limit(candidate_pool).stream())
-                return [doc.to_dict() for doc in docs]
+                return recent_articles()[:candidate_pool]
 
             def _load_bookmark_articles():
                 if not user_id:
@@ -540,21 +576,13 @@ class NewsService:
                              query: str,
                              category: Optional[str] = None,
                              limit: int = 20) -> Dict[str, Any]:
-        """기사 검색"""
+        """기사 검색: 최근 RECENT_POOL건 범위의 제목·요약 부분일치.
+        (예전엔 컬렉션 전체를 stream — 검색 1회가 전 문서 읽기라 무료 쿼터를 소진시켰다)"""
         try:
-            articles_ref = db.collection("articles")
-
-            # 기본적인 제목 검색 (Firestore의 제한으로 인해 간단한 구현)
-            # 실제 프로덕션에서는 Elasticsearch 등 사용 권장
-            if category:
-                docs = articles_ref.where("category", "==", category).stream()
-            else:
-                docs = articles_ref.stream()
-
-            # 클라이언트 사이드 필터링 (제목과 요약에서 검색)
             matched_articles = []
-            for doc in docs:
-                article = doc.to_dict()
+            for article in recent_articles():
+                if category and article.get("category") != category:
+                    continue
                 if (query.lower() in article.get("title", "").lower() or 
                     query.lower() in article.get("ai_summary", "").lower()):
                     matched_articles.append(article)
@@ -596,12 +624,8 @@ class NewsService:
         try:
             if not interests:
                 return {"success": True, "message": "관심사가 없습니다.", "data": {"articles": [], "count": 0}}
-            query = (db.collection("articles")
-                     .order_by("published_at", direction=firestore.Query.DESCENDING)
-                     .limit(100))
             matched = []
-            for doc in query.stream():
-                a = doc.to_dict()
+            for a in recent_articles()[:100]:
                 if matches_interests(a, interests):
                     matched.append(a)
                 if len(matched) >= limit:
