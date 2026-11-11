@@ -1,4 +1,5 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Response, status
+from utils.http_cache import cache_headers
 from models.model import ResponseModel
 from typing import List
 from services.politics_service import politics_service
@@ -8,9 +9,10 @@ from models.model import PoliticalStatement
 router = APIRouter()
 
 @router.get("/president", response_model=ResponseModel)
-async def get_president():
+async def get_president(response: Response):
     """대통령 정보 반환"""
     data = await politics_service.get_president_info()
+    response.headers.update(cache_headers(True))
     return {
         "success": True,
         "message": "대통령 정보 조회 성공",
@@ -18,9 +20,10 @@ async def get_president():
     }
 
 @router.get("/policies", response_model=ResponseModel)
-async def get_policies():
+async def get_policies(response: Response):
     """최근 정책 반환"""
     data = await politics_service.get_recent_policies()
+    response.headers.update(cache_headers(True))
     return {
         "success": True,
         "message": "정책 정보 조회 성공",
@@ -38,9 +41,10 @@ async def get_policies():
 #     }
 
 @router.get("/statements", response_model=ResponseModel)
-async def get_statements():
+async def get_statements(response: Response):
     """정치인 발언 반환"""
     data = await politics_service.get_political_statements()
+    response.headers.update(cache_headers(True))
     return {
         "success": True,
         "message": "정치인 발언 조회 성공",

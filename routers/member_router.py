@@ -17,8 +17,11 @@ def _require_admin(x_admin_key: Optional[str]):
 
 
 @router.get("", response_model=ResponseModel)
-async def list_members(party: Optional[str] = None, limit: int = 20, offset: int = 0):
-    return await member_service.list_members(party=party, limit=limit, offset=offset)
+async def list_members(response: Response, party: Optional[str] = None, limit: int = 20, offset: int = 0):
+    # 앱이 limit=400(전체)으로 부르므로 호출마다 최대 400건 읽기 → CDN 캐시 필수
+    result = await member_service.list_members(party=party, limit=limit, offset=offset)
+    response.headers.update(cache_headers(result.get("success", False)))
+    return result
 
 
 @router.get("/{member_id}", response_model=ResponseModel)

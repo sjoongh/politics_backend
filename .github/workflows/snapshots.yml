@@ -1,0 +1,35 @@
+name: Snapshots (static JSON → GitHub Pages)
+# 수집이 끝날 때마다 공개 GET 응답을 정적 JSON으로 내보내 GitHub Pages에 배포한다.
+# 프론트는 이 파일을 먼저 읽고(Firestore 읽기 0), 없거나 오래되면 API로 폴백한다.
+# ⚠️ workflows 이름은 news-collect.yml의 name과 정확히 같아야 한다.
+on:
+  workflow_run:
+    workflows: ["News Collect (hourly)"]
+    types: [completed]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # 표준 라이브러리만 사용(의존성 설치 없음). 정상본이 하나도 없으면 실패 → 배포 생략(기존 Pages 유지)
+      - name: Export public API responses
+        run: python scripts/export_snapshots.py --out _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
