@@ -1,11 +1,9 @@
 import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from routers import auth_router, bookmark_router, comment_router, feedback_router, news_router, notification_router, politics_router, statistic_router, summary_router, health_check_router, member_router, issue_router, assembly_router, source_router, share_router
 import os
-from common.exception_handlers import http_exception_handler, general_exception_handler  # 위에서 만든 함수들
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from common.exception_handlers import configure_errors_and_cors
 
 # 환경 변수 로드
 load_dotenv()
@@ -27,20 +25,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# allow_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-# allow_origins.append("https://koreanpolitical.web.app")
-# allow_origins.append("https://koreanpolitical.firebaseapp.com")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 모든 오리진 허용(웹/모바일). 자격증명 미사용이라 와일드카드 유효.
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-app.add_exception_handler(Exception, general_exception_handler)
+configure_errors_and_cors(app)
 
 # 루트 경로
 @app.get("/")

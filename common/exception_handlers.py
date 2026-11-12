@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 
@@ -24,3 +26,58 @@ async def general_exception_handler(request: Request, exc: Exception):
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+class UnhandledErrorMiddleware:
+    """미처리 예외를 CORS 안쪽에서 500 JSON으로 바꾼다.
+    Starlette의 Exception 핸들러는 CORS 바깥(ServerErrorMiddleware)에서 돌아 CORS 헤더가 빠지고,
+    브라우저는 500 대신 CORS 오류만 보게 된다."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = False
+
+        async def _send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _send)
+        except Exception as exc:
+            if started:
+                raise
+            traceback.print_exc()
+            _capture(exc)
+            response = await general_exception_handler(Request(scope), exc)
+            await response(scope, receive, send)
+
+
+def _capture(exc: Exception):
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
+    except Exception:
+        pass
+
+
+def configure_errors_and_cors(app):
+    """오류 처리와 CORS 설정. 나중에 추가한 미들웨어가 바깥이므로 CORS를 마지막에 둔다."""
+    from fastapi.middleware.cors import CORSMiddleware
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    app.add_middleware(UnhandledErrorMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # 모든 오리진 허용(웹/모바일). 자격증명 미사용이라 와일드카드 유효.
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
