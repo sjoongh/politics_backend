@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 import routers.share_router as sr
 
 app = FastAPI()
@@ -28,6 +29,24 @@ def test_article_share_renders_og(monkeypatch):
     assert r.status_code == 200
     assert 'og:title" content="기사 제목"' in r.text
     assert "/?article=xy" in r.text
+
+
+@pytest.mark.parametrize("kind", ["issue", "article"])
+def test_deleted_content_uses_brand_image_and_returns_home(monkeypatch, kind):
+    monkeypatch.setattr(sr, f"_fetch_{kind}_meta", lambda i: None)
+    r = client.get(f"/share/{kind}/deleted")
+    assert r.status_code == 200
+    assert f'og:image" content="{sr.OG_DEFAULT_IMAGE}"' in r.text
+    assert f'location.replace("{sr.WEB_APP_URL}")' in r.text
+    assert f'<noscript><a href="{sr.WEB_APP_URL}"' in r.text
+
+
+@pytest.mark.parametrize("kind", ["issue", "article"])
+def test_temporary_failure_preserves_content_destination(monkeypatch, kind):
+    monkeypatch.setattr(sr, f"_fetch_{kind}_meta", lambda i: sr.FETCH_FAILED)
+    r = client.get(f"/share/{kind}/retry-later")
+    assert r.headers["cache-control"] == "no-store"
+    assert f'location.replace("{sr.WEB_APP_URL}/?{kind}=retry-later")' in r.text
 
 
 def test_issue_og_png_endpoint(monkeypatch):

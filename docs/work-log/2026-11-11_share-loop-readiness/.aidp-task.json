@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskId": "2026-11-11_share-loop-readiness",
+  "title": "공유 유입 점검과 오류 복구",
+  "goal": "공유 링크의 정상·삭제·조회 실패 흐름을 검증하고 운영 차단 원인을 기록한다",
+  "root": "/Users/manager/side/politics_backend",
+  "startedAt": "2026-11-11T13:24:47+09:00",
+  "baseSha": "4dc35320ee0e7c7d1af5bf012389182d694e3ba7",
+  "branch": "main",
+  "dirtyAtStart": false,
+  "requiredChecks": [],
+  "status": "active",
+  "latestEvidence": null,
+  "latestEvidenceSha256": null,
+  "closedAt": null
+}
