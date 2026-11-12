@@ -72,15 +72,7 @@ class NewsService:
                 "https://www.seoul.co.kr/xml/rss/rss_politics.xml",  # 서울신문
                 "https://fs.jtbc.co.kr/RSS/politics.xml",  # JTBC
             ],
-            "대통령": [
-                "https://www.korea.kr/rss/president.xml",  # 대통령실 공식
-            ],
-            "정책": [
-                "https://www.korea.kr/rss/policy.xml",  # 정책 뉴스
-            ],
-            "정부": [
-                "https://www.korea.kr/rss/ebriefing.xml",  # 정부 브리핑
-            ]
+            # korea.kr 정책브리핑 RSS(대통령·정책·정부)는 2026-07-01 중단. 정부 보도자료는 source_ingest_service가 source_items(gov_policy)로 수집한다.
         }
         self.request_delay = 3  # RSS 요청 간 3초 지연
 
