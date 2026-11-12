@@ -30,6 +30,26 @@ def test_unhandled_error_keeps_cors_header():
     assert r.json()["success"] is False
 
 
+def test_unhandled_error_uses_registered_handler():
+    from fastapi.responses import JSONResponse
+
+    app = FastAPI()
+    configure_errors_and_cors(app)
+
+    async def custom(request, exc):
+        return JSONResponse({"success": False, "message": "커스텀"}, status_code=503)
+
+    app.add_exception_handler(Exception, custom)
+
+    @app.get("/boom")
+    async def boom():
+        raise RuntimeError("boom")
+
+    r = TestClient(app, raise_server_exceptions=False).get("/boom", headers=ORIGIN)
+    assert r.status_code == 503 and r.json()["message"] == "커스텀"
+    assert r.headers.get("access-control-allow-origin") == "*"
+
+
 def test_http_error_keeps_cors_header():
     r = _client().get("/gone", headers=ORIGIN)
     assert r.status_code == 404

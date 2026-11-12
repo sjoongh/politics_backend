@@ -52,9 +52,11 @@ class UnhandledErrorMiddleware:
         except Exception as exc:
             if started:
                 raise
+            # 다시 올리지 않는다(응답을 보낸 뒤의 예외 처리는 서버마다 달라 Vercel에서 보장되지 않음). 로깅·Sentry는 여기서.
             traceback.print_exc()
             _capture(exc)
-            response = await general_exception_handler(Request(scope), exc)
+            handler = scope["app"].exception_handlers.get(Exception, general_exception_handler)
+            response = await handler(Request(scope), exc)
             await response(scope, receive, send)
 
 
