@@ -2,7 +2,7 @@
 --apply: 백업 덤프 → 남는 문서에 기사·메타·이벤트·키워드 합치기 → 흡수 문서 merged_into/active=False
         → 흡수 문서를 가리키던 source_items의 issue_id/issue_ids/links를 남는 id로 치환.
 
-실행: .venv/bin/python scripts/merge_duplicate_issues.py [--report /tmp/merge-report.md] [--apply]
+실행: .venv/bin/python scripts/merge_duplicate_issues.py [--report /tmp/merge-report.md] [--ignore-stale] [--apply]
 """
 import argparse
 import os
@@ -39,14 +39,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--report", default=None)
+    ap.add_argument("--ignore-stale", action="store_true",
+                    help="14일 활동 조건을 끄고 오래된 중복까지 본다(수동 일회성 정리)")
     args = ap.parse_args(argv)
 
     from firebase.firebase_config import db
-    from utils.issue_merge import merge_plan
+    from utils.issue_merge import merge_plan, STALE_DAYS
     now = datetime.now(timezone.utc)
     issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()]
     by_id = {i["id"]: i for i in issues}
-    pairs = merge_plan(issues, now)
+    pairs = merge_plan(issues, now, stale_days=None if args.ignore_stale else STALE_DAYS)
 
     lines = [f"# 병합 dry-run {now.isoformat()}", "", f"이슈 {len(issues)}개 중 병합 쌍 {len(pairs)}개", "",
              "| 흡수될 이슈 | → 남는 이슈 | 기사 | 겹침 |", "|---|---|---|---|"]

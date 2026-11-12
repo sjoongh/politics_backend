@@ -91,13 +91,15 @@ def _token_jaccard(p_a, p_b) -> float:
     return len(a & b) / len(a | b)
 
 
-def should_merge(cluster: dict, issue: dict, now: datetime) -> bool:
+def should_merge(cluster: dict, issue: dict, now: datetime, stale_days: int | None = STALE_DAYS) -> bool:
+    """stale_days=None은 활동 기간 조건을 끈다(오래된 중복을 한 번 정리하는 수동 실행 전용)."""
     person = cluster.get("person")
     if not person or person not in ((issue.get("entities") or {}).get("people") or []):
         return False
-    last = _last_activity(issue)
-    if last is None or now - last > timedelta(days=STALE_DAYS):
-        return False
+    if stale_days is not None:
+        last = _last_activity(issue)
+        if last is None or now - last > timedelta(days=stale_days):
+            return False
     phrases = list(cluster.get("phrases") or [])
     issue_phrases = [k for k in (issue.get("keywords") or []) if k and k != person]
     if _phrase_contains(phrases, issue_phrases):
@@ -105,7 +107,7 @@ def should_merge(cluster: dict, issue: dict, now: datetime) -> bool:
     return _token_jaccard(phrases, issue_phrases) >= TOKEN_JACCARD_MIN
 
 
-def merge_plan(issues, now: datetime):
+def merge_plan(issues, now: datetime, stale_days: int | None = STALE_DAYS):
     """(흡수될 id, 남을 id) 쌍. 뉴스 이슈끼리만, 오래된 것이 남고, 한 문서는 한 번만."""
     news = [i for i in (issues or []) if str(i.get("auto_key") or "").startswith("news:") and not i.get("merged_into")]
     news.sort(key=lambda i: str(i.get("started_at") or i.get("updated_at") or ""))
@@ -118,7 +120,7 @@ def merge_plan(issues, now: datetime):
                 continue
             cluster = {"article_ids": set(other.get("article_ids") or []), "person": _issue_person(other),
                        "phrases": [k for k in (other.get("keywords") or []) if k and k != _issue_person(other)]}
-            if should_merge(cluster, keep, now):
+            if should_merge(cluster, keep, now, stale_days):
                 pairs.append((other["id"], keep["id"]))
                 taken.add(other["id"])
     return pairs

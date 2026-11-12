@@ -53,7 +53,7 @@ def stance_from_official(gov_sources) -> list:
     for s in (gov_sources or []):
         if s.get("type") not in (None, "gov_policy") or not s.get("position"):
             continue
-        actor = ministry_of((s.get("title") or "") + " " + (s.get("excerpt") or ""))
+        actor = s.get("ministry") or ministry_of((s.get("title") or "") + " " + (s.get("excerpt") or ""))
         at = str(s.get("published_at") or "")
         if actor in latest and str(latest[actor]["at"]) >= at:
             continue

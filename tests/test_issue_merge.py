@@ -90,3 +90,12 @@ def test_merge_plan_skips_merged_and_non_news():
     m = {"id": "m", "started_at": "2026-09-01", "entities": {"people": ["권영진"]},
          "article_ids": ["1", "2"], "keywords": ["멱살 파문"], "updated_at": "2026-11-09"}
     assert merge_plan([a, b, m], NOW) == []
+
+
+def test_merge_plan_stale_days_override_for_one_off_cleanup():
+    a = {"id": "a", "started_at": "2026-07-01", "auto_key": "news:a", "entities": {"people": ["권영진"]},
+         "article_ids": ["1"], "keywords": ["멱살 파문"], "digest": {"last_activity_at": "2026-08-10T00:00:00+00:00"}}
+    b = {"id": "b", "started_at": "2026-07-05", "auto_key": "news:b", "entities": {"people": ["권영진"]},
+         "article_ids": ["2"], "keywords": ["멱살"], "digest": {"last_activity_at": "2026-08-12T00:00:00+00:00"}}
+    assert merge_plan([a, b], NOW) == []
+    assert merge_plan([a, b], NOW, stale_days=None) == [("b", "a")]

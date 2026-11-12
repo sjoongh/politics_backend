@@ -5,26 +5,14 @@ AI 보강은 Task 5에서 수집 후 배치로 채운다.
 """
 import os
 from datetime import datetime, timezone
-import xml.etree.ElementTree as ET
 import httpx
 
 from google.cloud import firestore
 from firebase.firebase_config import db
 from utils.source_item import normalize_gov_policy, normalize_bill, normalize_vote
+from utils.korea_briefing import PRESS_LIST_URL, parse_press_list
 
-KOREA_RSS = "https://www.korea.kr/rss/policy.xml"
 ASSEMBLY_AGE = os.getenv("ASSEMBLY_AGE", "22")
-
-
-def _parse_rss(xml_bytes):
-    root = ET.fromstring(xml_bytes)
-    out = []
-    for it in root.findall(".//item"):
-        d = {}
-        for ch in it:
-            d[ch.tag.split("}")[-1]] = (ch.text or "")
-        out.append(d)
-    return out
 
 
 def _now():
@@ -46,16 +34,16 @@ def _save_new(source):
 
 class SourceIngestService:
     async def ingest_gov_policy(self, limit: int = 50) -> dict:
-        """정책브리핑 korea.kr RSS 수집."""
+        """정책브리핑 보도자료 목록 1페이지 수집(RSS는 2026-07-01 중단)."""
         try:
             # 정부/공공 사이트는 기본 UA(python-httpx)·CI IP를 막는 경우가 있어 브라우저 UA + 재시도.
             headers = {"User-Agent": "Mozilla/5.0 (compatible; BriefingKoreaBot/1.0)",
-                       "Accept": "application/rss+xml, application/xml, text/xml, */*"}
+                       "Accept": "text/html,application/xhtml+xml"}
             r = None
             async with httpx.AsyncClient(timeout=20, headers=headers, follow_redirects=True) as c:
                 for attempt in range(3):
                     try:
-                        r = await c.get(KOREA_RSS)
+                        r = await c.get(PRESS_LIST_URL)
                         if r.status_code == 200:
                             break
                     except httpx.HTTPError:
@@ -64,8 +52,10 @@ class SourceIngestService:
                     await _a.sleep(1.5)
             if r is None:
                 return {"success": False, "message": "정부 소스 수집 실패(요청 불가)"}
-            r.raise_for_status()                 # 4xx/5xx HTML을 XML로 오파싱 방지(codex)
-            items = _parse_rss(r.content)[:limit]
+            r.raise_for_status()
+            items = parse_press_list(r.text)[:limit]
+            if not items:                        # 페이지 구조 변경을 조용한 0건으로 숨기지 않는다
+                return {"success": False, "message": "정부 소스 수집 실패(목록 파싱 0건)"}
             new = failed = 0
             for it in items:                     # per-item skip(한 건 실패가 전체로 번지지 않게)
                 try:
