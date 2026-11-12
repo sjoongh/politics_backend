@@ -32,7 +32,7 @@ def extract_entities(text):
 
 
 def normalize_gov_policy(item):
-    """korea.kr 정책브리핑 RSS item dict → source_item."""
+    """정책브리핑 보도자료 항목(utils.korea_briefing.parse_press_list) → source_item."""
     url = item.get("link") or item.get("guid") or ""
     title = strip_html(item.get("title"))
     desc = strip_html(item.get("description"))
@@ -43,6 +43,7 @@ def normalize_gov_policy(item):
         "type": "gov_policy",
         "actor_type": "government",
         "actor_name": "대한민국 정부(정책브리핑)",
+        "ministry": item.get("ministry") or None,
         "title": title,
         "excerpt": desc[:300],    # KOGL 공공자료 짧은 발췌(AI 보강 입력용)
         "summary": None,          # Task 5에서 AI 채움
