@@ -9,8 +9,8 @@
   "branch": "main",
   "dirtyAtStart": false,
   "requiredChecks": [],
-  "status": "active",
-  "latestEvidence": null,
+  "status": "complete",
+  "latestEvidence": "validation.md",
   "latestEvidenceSha256": null,
-  "closedAt": null
+  "closedAt": "2026-11-12T02:44:16.486448+00:00"
 }

@@ -5,7 +5,20 @@
 - origin/main 동기 확인: backend dd69b02, frontend 7be4c0a. 이전 로컬 수정 이외 추가 코드 변경 없음.
 - 운영 기사 목록/이슈 목록 HTTP 200, success=true. 전일 429는 현재 재현되지 않음.
 - 백엔드 전체 283 passed, 프런트 73 passed. 프로덕션 빌드 성공(기존 경고 2개 유지).
-- 스냅샷 Actions 43128600991 성공. 뉴스 수집 Actions 43127896497 실패는 별도 확인 중.
+- 스냅샷 Actions 43128600991 성공. 공개 manifest 5/5 확인(4개 2026-11-12 09:37 KST 갱신, 의원 파일은 2026-11-11 17:08 KST 정상본 유지).
+- 뉴스 수집 Actions 43127896497: 일부 RSS 형식 오류와 정부 policy.xml 404 관측. reads=1429, writes=110, gemini=17. 공유 기능과 별도 운영 문제이며 실패가 전체 수집 중단을 뜻하지는 않는다.
+- backend PR https://github.com/sjoongh/politics_backend/pull/10 머지(3df7acc); pytest CI 통과.
+- frontend PR https://github.com/sjoongh/politics_front/pull/5 머지(775c426); 빌드·Firebase preview CI 통과.
+- Vercel 운영 배포 dpl_6Tve71gHEc3LTJwSCQyp9A7Ta6TF READY. alias https://politicsbackend-ruby.vercel.app.
+- Firebase Hosting 운영 배포 완료. 운영 HTML에서 빌드 main.db7e99c2.js 확인.
+- 격리 회귀 12개 재통과. 배포 후 실제 콘텐츠의 모바일 390px/데스크톱 1280px 8개 검증 통과: 기사·이슈 각각 OG HTML/PNG/상세 진입/공유 URL, 삭제 링크 홈, 일시 오류(브라우저에서만 503 주입) 후 실제 기사 재시도. 브라우저 runtime error 없음.
+- 실제 이미지 1200×630 PNG 확인 및 기사 이미지·모바일 리더·데스크톱 이슈 상세 시각 확인.
+- 실제 검증 ID: article fc3a8a306a7ca19252e07ffe4b0b65cc, issue 609c190844a5417c87695945e7bef25e.
+- 카카오·페이스북 크롤러 형식 UA 요청: HTTP 200, 실제 제목과 동적 이미지 URL 확인. 이것은 해당 플랫폼 자체 디버거나 메신저 카드 렌더 검증을 대신하지 않음.
+- 메신저 외부 발송 없이 navigator.share에 전달되는 URL만 검증. 검증 브라우저의 분석 요청 차단.
+- 증거: evidence/live-results-2026-11-12.json, /tmp/briefing-live-og-article.png, /tmp/briefing-live-article-390.png, /tmp/briefing-live-issue-1280.png.
+- 별도 관측: 기존 기사 리더의 원문 버튼 글자가 시각적으로 드러나지 않는 문제, 일부 본문 HTML entity 노출과 기사 OG 설명의 기본 문구 사용. 이번 공유 오류 복구 범위 밖으로 기록하며 디자인·콘텐츠 품질 전체 통과라고 하지 않는다.
+- 잔여: 메신저 앱 내 최종 카드 표시, 일일 DB 읽기 안정성, 홍보 유입 성과는 미검증/미측정. 현재 운영 조회와 공유 진입은 정상.
 
 ## 변경
 - backend routers/share_router.py: 문서가 없으면 기본 브랜드 이미지와 홈으로 이동. 조회 장애는 no-store와 원래 콘텐츠 목적지를 유지.
@@ -28,7 +41,7 @@
 - https://github.com/sjoongh/politics_backend/actions/runs/42944726252 : 스냅샷 0/5, 기존 정상본 없음. API 장애 때문에 생성되지 않았으며 재실행하지 않음.
 - 운영 DB 데이터 쓰기, 수집 재실행, 과금 변경, 메신저 발송, 광고 집행 없음.
 - 카카오/페이스북 실제 카드, 현재 운영 콘텐츠 진입은 미검증. 쿼터 회복 후 검증 필요.
-- 코드 수정은 로컬 작업트리에 보존. 커밋·push·배포 미실시.
+- 위는 2026-11-11 당시 기록이며, 커밋·push·배포는 2026-11-12 상단 재개 기록대로 완료.
 
 ## 홍보 재개 기준 / 측정
 1. 기사/이슈 목록과 상세가 정상 응답하고, 실제 콘텐츠의 공유 HTML·이미지·최종 상세 진입이 일치해야 한다.
