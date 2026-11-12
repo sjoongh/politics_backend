@@ -105,11 +105,12 @@ def _html(kind: str, content_id: str, meta, share_url: str, redirect_url: str) -
     body = render_share_html(
         title=m.get("title") or "",
         description=m.get("description") or "",
-        image_url=_og_image_url(kind, content_id, m) if not failed else OG_DEFAULT_IMAGE,
+        image_url=_og_image_url(kind, content_id, m) if isinstance(meta, dict) else OG_DEFAULT_IMAGE,
         image_width=OG_W,
         image_height=OG_H,
         share_url=share_url,
-        redirect_url=redirect_url,
+        # 문서 없음은 홈으로, 일시 조회 장애는 원래 링크를 보존해 재시도 가능하게.
+        redirect_url=WEB_APP_URL if meta is None else redirect_url,
     )
     return HTMLResponse(content=body, status_code=200,
                         headers={"Cache-Control": ERROR_CACHE_CONTROL if failed else CACHE_CONTROL})
