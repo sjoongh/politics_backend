@@ -180,7 +180,11 @@ class SourceLinkService:
                            .order_by("published_at", direction=_fs.Query.DESCENDING).limit(limit).stream()]
             n_auto = n_pending = 0
             cands, touched = [], []
+            max_writes = 50   # 실행당 관계 쓰기 상한(규칙 오작동 시 쓰기 폭증 방지)
             for iss in issues:
+                if not dry_run and n_auto + n_pending >= max_writes:
+                    print(f"[link_news_issues] 쓰기 상한 {max_writes} 도달 — 나머지는 다음 실행")
+                    break
                 blob = " ".join([iss.get("title") or "", iss.get("summary") or ""] + list(iss.get("keywords") or []))
                 people = (iss.get("entities") or {}).get("people") or []
                 for src in sources:
