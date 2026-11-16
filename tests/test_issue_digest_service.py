@@ -135,7 +135,7 @@ class _NestedDB:
                     ok = True
                     for f, op, v in self.filters:
                         cur = _NestedDB._get(d, f)
-                        if cur is None or (op == ">=" and not cur >= v) or (op == "<" and not cur < v):
+                        if cur is None or (op == "==" and cur != v) or (op == ">=" and not cur >= v) or (op == "<" and not cur < v):
                             ok = False
                     if ok:
                         yield Snap(_id, d)
@@ -149,14 +149,18 @@ def test_sweep_quiet_band_and_dotted_persist(monkeypatch):
         "crossed": {"auto_key": "news:a", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
                     "digest": {"counts": {}, "last_activity_at": "2026-10-16T12:00:00+00:00", "rank": 5.0}},   # 30.5일
         "old": {"auto_key": "news:b", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
-                "digest": {"counts": {}, "last_activity_at": "2026-09-01T00:00:00+00:00", "rank": 5.0}},       # 구간 밖
+                "digest": {"counts": {}, "last_activity_at": "2026-08-01T00:00:00+00:00", "rank": 5.0}},       # 90일 밖
+        "missed": {"auto_key": "news:d", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
+                   "digest": {"counts": {}, "last_activity_at": "2026-10-13T00:00:00+00:00", "rank": 5.0}},    # 34일(크론 정지로 놓친 것)
+        "quiet": {"auto_key": "news:e", "auto_generated": True, "newsworthiness": 20, "status": "소강", "active": True,
+                  "digest": {"counts": {}, "last_activity_at": "2026-10-10T00:00:00+00:00", "rank": 0.0}},      # 이미 소강 → 안 읽음
         "recent": {"auto_key": "news:c", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
                    "digest": {"counts": {}, "last_activity_at": "2026-11-15T00:00:00+00:00", "rank": 5.0}},     # ctx 창 안
     }
     db = _NestedDB(docs)
     monkeypatch.setattr(mod, "db", db)
     n = mod.issue_digest_service._sweep_quiet(now)
-    assert n == 1 and [w[0] for w in db.writes] == ["crossed"]
+    assert n == 2 and sorted(w[0] for w in db.writes) == ["crossed", "missed"]
     assert docs["crossed"]["status"] == "소강"
     assert docs["crossed"]["digest"]["rank"] < 5.0 and "digest.rank" not in docs["crossed"]   # 중첩 필드로 저장
     assert docs["old"]["status"] == "진행중" and docs["recent"]["status"] == "진행중"

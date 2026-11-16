@@ -132,8 +132,9 @@ class IssueClusterService:
                                   "newsworthiness", "record_date", "updated_at")}
                         if not cur_doc.get("ai_summarized"):
                             patch["summary"] = doc["summary"]
-                        if cur_doc.get("active") is None or cur_doc.get("inactive_reason") == "gate":
-                            patch["active"] = True   # 기준 미달로 자동 비활성됐다가 다시 기준을 넘은 경우만 복귀
+                        if cur_doc.get("active") is not True:
+                            # 사람이 퇴역시킨 문서(retired_reason)는 위에서 건너뛰었으므로, 여기 오는 비활성은 기준 미달 자동 비활성뿐
+                            patch["active"] = True
                             patch["inactive_reason"] = None
                         ref.update(patch)
                         updated += 1

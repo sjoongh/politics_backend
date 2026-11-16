@@ -5,7 +5,7 @@
 
 변경되지 않은 이슈도 ctx에 이미 올라온 것은 순위만 다시 계산한다(시간 감쇠). 이전에는 변경된 이슈만
 계산해 사흘 지난 이슈가 같은 점수로 1위에 머물렀다(2026-11-16 관측). 추가 읽기 없음, 차이 0.1↑만 쓴다.
-뉴스 이슈는 30일 무활동이면 '소강'. ctx(최근 30일) 밖으로 막 나간 이슈는 30~32일 구간 조회로 잡는다.
+뉴스 이슈는 30일 무활동이면 '소강'. ctx(최근 30일) 밖으로 나간 '진행중' 이슈는 30~90일 구간 조회로 잡는다.
 """
 import os
 from datetime import datetime, timezone
@@ -129,14 +129,15 @@ class IssueDigestService:
 
     @staticmethod
     def _sweep_quiet(now) -> int:
-        """ctx 창(30일) 밖으로 막 나간 이슈(30~32일 무활동)를 소강 처리·순위 감쇠. 단일 필드 범위 조회(자동 인덱스).
-        구간을 2일로 좁혀 매 실행 같은 문서를 다시 읽지 않는다(크론이 하루 넘게 멈추면 놓칠 수 있음 → backfill retitle로 정리)."""
-        lo = (now - timedelta(days=QUIET_DAYS + 2)).isoformat()
+        """ctx 창(30일) 밖으로 나간 '진행중' 이슈(30~90일 무활동)를 소강 처리·순위 감쇠.
+        status=='진행중' 조건(복합 인덱스 status+digest.last_activity_at)으로 이미 소강이 된 문서는 다시 읽지 않고,
+        넓은 구간으로 크론이 며칠 멈춰도 놓치지 않는다."""
+        lo = (now - timedelta(days=90)).isoformat()
         hi = (now - timedelta(days=QUIET_DAYS)).isoformat()
         n = 0
         try:
-            q = (db.collection(COLLECTION).where("digest.last_activity_at", ">=", lo)
-                 .where("digest.last_activity_at", "<", hi))
+            q = (db.collection(COLLECTION).where("status", "==", "진행중")
+                 .where("digest.last_activity_at", ">=", lo).where("digest.last_activity_at", "<", hi))
             for d in q.stream():
                 iss = {**d.to_dict(), "id": d.id}
                 if iss.get("active") is False:
