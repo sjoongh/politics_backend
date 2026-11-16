@@ -67,6 +67,33 @@ def test_rank_caps_and_decays():
                       "2026-11-10T00:00:00+00:00", NOW) >= 1000
 
 
+def test_official_record_outranks_press_after_days():
+    # 3일 전 표결이 붙은 이슈는, 같은 3일 전 보도만 있는 이슈보다 위(공식 기록 가산은 천천히 식는다)
+    from utils.issue_digest import rank_score as rs
+    t = "2026-11-07T00:00:00+00:00"
+    with_vote = rs({"auto_generated": True, "newsworthiness": 10}, {"vote": 1}, t, NOW, "2026-11-07")
+    press_only = rs({"auto_generated": True, "newsworthiness": 20}, {}, t, NOW)
+    assert with_vote > press_only
+
+
+def test_rerank_skips_small_change_and_decays():
+    from utils.issue_digest import rerank
+    iss = {"auto_generated": True, "newsworthiness": 20,
+           "digest": {"counts": {}, "last_activity_at": "2026-11-07T00:00:00+00:00", "rank": 19.99}}
+    new = rerank(iss, NOW)
+    assert new is not None and new < 19.99
+    iss["digest"]["rank"] = new
+    assert rerank(iss, NOW) is None
+
+
+def test_news_status_quiet_after_30_days():
+    from utils.issue_digest import news_status
+    news = {"auto_key": "news:1"}
+    assert news_status(news, "2026-10-01T00:00:00+00:00", NOW) == "소강"
+    assert news_status(news, "2026-11-01T00:00:00+00:00", NOW) == "진행중"
+    assert news_status({"auto_key": "bill:1"}, "2026-01-01", NOW) is None
+
+
 def test_rank_handles_bad_timestamp():
     assert rank_score({"auto_generated": True, "newsworthiness": 5}, {"gov": 0, "bill": 0, "vote": 0}, "", NOW) >= 0
 

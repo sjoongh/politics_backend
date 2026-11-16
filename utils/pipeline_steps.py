@@ -1,5 +1,5 @@
 """파이프라인 단계 선택(순수). 가벼운 단계는 매시, 무거운 단계는 KST 3시간마다(0,3,…,21시)."""
-LIGHT = ["collect_news"]
+LIGHT = ["collect_news", "check_freshness"]   # check_freshness: 최신 기사 1건만 읽어 수집 정지를 실패로 드러낸다
 HEAVY = ["ingest_gov", "ingest_bills", "ingest_votes", "enrich_pending", "generate_bill_issues",
          "link_unlinked", "crosslink", "generate_news_issues", "link_news_issues",
          "summarize_pending_issues", "refresh_digest", "build_edition"]
@@ -42,3 +42,19 @@ def heavy_due(last_heavy_at, now, every_hours: int = HEAVY_EVERY_HOURS) -> bool:
 def daily_due(last_daily_date, now) -> bool:
     """KST 날짜 기준 하루 1회."""
     return last_daily_date != now.astimezone(_KST).strftime("%Y-%m-%d")
+
+
+FRESHNESS_HOURS = 8
+
+
+def is_stale(latest_iso, now, hours: int = FRESHNESS_HOURS) -> bool:
+    """가장 최근 기사의 수집 시각이 hours보다 오래됐으면 True(수집 정지). 기록 없음·깨짐도 True."""
+    if not latest_iso:
+        return True
+    try:
+        t = datetime.fromisoformat(str(latest_iso).replace("Z", "+00:00").replace(" ", "T"))
+    except ValueError:
+        return True
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=_tz.utc)
+    return now - t > timedelta(hours=hours)

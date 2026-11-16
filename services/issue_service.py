@@ -49,7 +49,7 @@ class IssueService:
                        v=None, sort: str = "rank", filter=None, cursor=None) -> dict:
         if v == 2:
             return IssueService._list_v2(sort=sort, filter_=filter, cursor=cursor, limit=limit)
-        query = db.collection(COLLECTION)
+        query = db.collection(COLLECTION).where("active", "==", True)   # 병합·비활성 문서가 상한(200)을 잠식하지 않게
         if status:
             query = query.where("status", "==", status)
         if category:

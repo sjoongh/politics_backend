@@ -41,16 +41,6 @@ def _rep_phrase(members):
     return sorted(cnt.items(), key=lambda kv: (kv[1], len(kv[0])), reverse=True)[0][0]
 
 
-def _title(names, rep_phrase):
-    if names and rep_phrase:
-        return f"{names[0]} ‘{rep_phrase}’"
-    if rep_phrase:
-        return f"‘{rep_phrase}’ 논란"
-    if names:
-        return f"{names[0]} 관련 현안"
-    return "정치 현안"
-
-
 class NewsIssueService:
     async def generate_news_issues(self, days: int = 7, scan: int = 400, ctx=None) -> dict:
         """ctx(PipelineContext)가 있으면 기사·이슈·의원명을 공유 로더에서 받아 읽기를 아낀다."""
@@ -152,6 +142,8 @@ class NewsIssueService:
                 if snap.exists:
                     cur_doc = snap.to_dict() or {}
                     patch = {k: doc[k] for k in ("title", "keywords", "newsworthiness", "updated_at")}
+                    # 인물 목록도 현재 군집 기준으로 갱신(생성 시 값에 고정돼 병합 판정에서 계속 탈락하던 문제)
+                    patch["entities"] = {**(cur_doc.get("entities") or {}), "people": people}
                     patch.update(attach_articles(cur_doc, members))
                     if not cur_doc.get("ai_summarized"):
                         patch["summary"] = fallback_summary({**cur_doc, **patch, "auto_key": doc["auto_key"]}, by_id)

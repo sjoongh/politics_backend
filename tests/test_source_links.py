@@ -37,3 +37,40 @@ def test_score_proposer_pending():
 
 def test_score_short_law_name_ignored():
     assert news_issue_link_score({"law_name": "형법", "bill": None}, "형법 개정", []) == (0, None)
+
+
+LAW_SP = "윤석열 정권 검찰청, 국가정보원, 감사원 등의 조작수사ㆍ조작기소 등 의혹의 진상규명을 위한 특별검사 임명 등에 관한 법률안"
+
+
+def test_law_mention_alias_special_prosecutor():
+    from utils.source_links import law_mention
+    assert law_mention(LAW_SP, "‘조작기소 특검법’ 논란") == "alias"
+    assert law_mention(LAW_SP, "민주당의조작기소 특검법 강행") == "alias"
+    assert law_mention(LAW_SP, "‘선관위 특검법안’ 논란") is None          # 핵심어가 법률명에 없음
+    assert law_mention("국민연금법", "국민연금법 개정 논의") == "exact"
+
+
+def test_law_mention_alias_law_suffix_and_generic_core():
+    from utils.source_links import law_mention
+    assert law_mention("형사소송법 일부개정법률안", "개정 형사소송법 시행") == "alias"
+    assert law_mention("지방주도성장을 위한 특별위원회 구성결의안", "특별위원회법 처리") is None   # 흔한 말
+    assert law_mention("항만법", "불법 방법") is None
+
+
+def test_news_link_score_alias_and_procedural():
+    from utils.source_links import news_issue_link_score
+    vote = {"type": "assembly_vote", "title": "표결: " + LAW_SP, "law_name": LAW_SP[:60], "procedural": False}
+    assert news_issue_link_score(vote, "‘조작기소 특검법’ 논란 조작기소 특검법", []) == (10.0, "auto")
+    proc = {"type": "assembly_vote", "title": "표결: 제437회국회 회기결정의 건", "law_name": "제437회국회 회기결정의 건",
+            "procedural": True}
+    assert news_issue_link_score(proc, "제437회국회 회기결정의 건", []) == (0, None)
+
+
+def test_law_mention_rejects_mid_word_and_generic_cores():
+    # Codex 리뷰 재현 사례: 단어 중간 조각·특검 법률 공통어만으로는 연결하지 않는다
+    from utils.source_links import law_mention
+    assert law_mention("개인정보 보호법", "위치정보보호법 처리 논란") is None
+    sp = "순직 해병 수사 방해 및 사건 은폐 등의 진상규명을 위한 특별검사의 임명 등에 관한 법률안"
+    assert law_mention(sp, "김건희 의혹 진상규명법 처리") is None
+    assert law_mention(sp, "김건희 특검법 처리") is None
+    assert law_mention(sp, "순직 해병 특검법 재표결") == "alias"

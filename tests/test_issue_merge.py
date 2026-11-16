@@ -8,18 +8,38 @@ def test_top_person():
     assert top_person([{"entities": {"people": ["권영진", "정점식"]}}, {"entities": {"people": ["권영진"]}}]) == "권영진"
 
 
+def test_top_person_reads_article_names_by_frequency():
+    # 기사 엔티티는 names 키. 가나다순이 아니라 빈도 1위(김민석 < 최민희 가나다순이지만 최민희가 많다)
+    arts = [{"entities": {"names": ["김민석", "최민희"]}}, {"entities": {"names": ["최민희"]}},
+            {"entities": {"names": ["최민희"]}}]
+    assert top_person(arts) == "최민희"
+
+
 def test_top_person_none():
     assert top_person([{"entities": {"people": []}}]) is None
 
 
-def test_clean_title_strips_name():
-    assert clean_title("김승원", "김승원 공세") == "김승원 ‘공세’"
+def test_clean_title_is_quote_centered():
+    # 인물을 인용구 앞에 붙이지 않는다(오귀속 방지)
+    assert clean_title("김민석", "하이에나 떼들") == "‘하이에나 떼들’ 논란"
+    assert clean_title("김승원", "김승원 공세") == "‘김승원 공세’ 논란"
 
 
 def test_clean_title_without_name_or_phrase():
     assert clean_title(None, "멱살 파문") == "‘멱살 파문’ 논란"
+    assert clean_title("김민석", "언행 논란") == "‘언행 논란’"
     assert clean_title("권영진", "") == "권영진 관련 현안"
     assert clean_title("권영진", "권영진") == "권영진 관련 현안"
+    assert clean_title(None, "") == "정치 현안"
+
+
+def test_merge_plan_skips_inactive_on_both_sides():
+    # 퇴역(active=False) 문서가 '남는 쪽'이 되면 병합 적용이 되살린다 → 후보에서 제외
+    base = {"auto_key": "news:x", "keywords": ["하이에나 떼들", "최민희"], "entities": {"people": ["최민희"]},
+            "updated_at": "2026-11-09T00:00:00+00:00"}
+    retired = {**base, "id": "retired", "active": False, "started_at": "2026-11-01"}
+    live = {**base, "id": "live", "active": True, "keywords": ["하이에나", "최민희"], "started_at": "2026-11-05"}
+    assert merge_plan([retired, live], NOW) == []
 
 
 def test_merge_requires_same_person():

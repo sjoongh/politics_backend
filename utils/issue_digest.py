@@ -14,7 +14,11 @@ from datetime import datetime, timezone
 from utils.ministries import ministry_of
 
 HALF_LIFE_HOURS = 72.0
+OFFICIAL_HALF_LIFE_HOURS = 168.0   # 공식 기록 가산은 보도보다 천천히 식는다(표결·발표는 며칠 뒤에도 맥락이 된다)
+OFFICIAL_WEIGHTS = {"vote": 10.0, "bill": 4.0, "gov": 3.0}
 AUTO_RANK_CAP = 40.0
+QUIET_DAYS = 30                     # 뉴스 이슈가 이 기간 활동이 없으면 '진행중' → '소강'
+RERANK_MIN_DELTA = 0.1
 MANUAL_BASE = 1000.0
 LEANINGS = ("left", "center", "right", "foreign")
 
@@ -104,17 +108,45 @@ def _parse_ts(s):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def rank_score(issue: dict, counts: dict, last_activity_at, now: datetime) -> float:
+def _decay(ts_value, now: datetime, half_life_hours: float) -> float:
+    ts = _parse_ts(ts_value)
+    if ts is None:
+        return 1.0
+    hours = max(0.0, (now - ts).total_seconds() / 3600.0)
+    return 0.5 ** (hours / half_life_hours)
+
+
+def rank_score(issue: dict, counts: dict, last_activity_at, now: datetime, last_official_at=None) -> float:
+    """보도 점수(min(사건성,20), 72h 반감) + 공식 기록 가산(표결 10·법안 4·정부 3, 168h 반감), 상한 40.
+    공식 기록 가산은 마지막 공식 기록 날짜로 식힌다(없으면 마지막 활동)."""
     if not issue.get("auto_generated"):
         return MANUAL_BASE
-    base = min(float(issue.get("newsworthiness") or 0.0), 20.0)
-    base += 6.0 * (1 if counts.get("vote") else 0) + 3.0 * (1 if counts.get("bill") else 0) \
-        + 2.0 * (1 if counts.get("gov") else 0)
+    press = min(float(issue.get("newsworthiness") or 0.0), 20.0) * _decay(last_activity_at, now, HALF_LIFE_HOURS)
+    official = sum(w for k, w in OFFICIAL_WEIGHTS.items() if counts.get(k))
+    official *= _decay(last_official_at or last_activity_at, now, OFFICIAL_HALF_LIFE_HOURS)
+    return round(min(press + official, AUTO_RANK_CAP), 3)
+
+
+def rerank(issue: dict, now: datetime):
+    """저장된 digest로 순위만 다시 계산(시간 감쇠 반영). 바꿀 필요 없으면 None."""
+    dg = issue.get("digest") or {}
+    if not dg:
+        return None
+    new = rank_score(issue, dg.get("counts") or {}, dg.get("last_activity_at"), now, dg.get("last_official_at"))
+    old = dg.get("rank")
+    if old is not None and abs(float(old) - new) < RERANK_MIN_DELTA:
+        return None
+    return new
+
+
+def news_status(issue: dict, last_activity_at, now: datetime):
+    """뉴스 자동 이슈의 상태(진행중/소강). 다른 이슈 유형은 None(건드리지 않음)."""
+    if not str(issue.get("auto_key") or "").startswith("news:"):
+        return None
     ts = _parse_ts(last_activity_at)
-    if ts is not None:
-        hours = max(0.0, (now - ts).total_seconds() / 3600.0)
-        base *= 0.5 ** (hours / HALF_LIFE_HOURS)
-    return round(min(base, AUTO_RANK_CAP), 3)
+    if ts is None:
+        return None
+    return "소강" if (now - ts).days >= QUIET_DAYS else "진행중"
 
 
 def build_digest(issue: dict, sources, now: datetime, press_stance=None) -> dict:
@@ -129,8 +161,10 @@ def build_digest(issue: dict, sources, now: datetime, press_stance=None) -> dict
     stance = stance_from_official([s for s in sources if s.get("type") == "gov_policy"]) \
         + stance_from_vote(vote_src) + list(press_stance or [])
     stance = stance[:6]
+    official_times = [str(s.get("published_at") or "") for s in sources if s.get("type") in ("gov_policy", "assembly_bill", "assembly_vote")]
     times = [str(s.get("published_at") or "") for s in sources] + [str((m or {}).get("at") or "") for m in meta.values()]
     last = max((t for t in times if t), default=str(issue.get("updated_at") or ""))
+    last_official = max((t for t in official_times if t), default=None)
     return {
         "counts": counts,
         "has_official": bool(counts["gov"] or counts["bill"] or counts["vote"]),
@@ -140,6 +174,7 @@ def build_digest(issue: dict, sources, now: datetime, press_stance=None) -> dict
         "stance": stance,
         "bias": bias_from_meta(meta),
         "last_activity_at": last,
-        "rank": rank_score(issue, counts, last, now),
+        "last_official_at": last_official,
+        "rank": rank_score(issue, counts, last, now, last_official),
         "rank_at": now.isoformat(),
     }

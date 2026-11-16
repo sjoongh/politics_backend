@@ -18,9 +18,11 @@ _STOP = {"관련", "논란", "현안", "의원", "대표", "정부", "국회", "
 
 
 def top_person(members):
+    """군집에서 가장 많이 언급된 의원. 기사 엔티티는 names(utils/news_entities), 이슈 문서는 people 키를 쓴다."""
     cnt = Counter()
     for m in (members or []):
-        for p in ((m.get("entities") or {}).get("people") or []):
+        ent = m.get("entities") or {}
+        for p in (ent.get("people") or ent.get("names") or []):
             if p:
                 cnt[p] += 1
     if not cnt:
@@ -29,15 +31,11 @@ def top_person(members):
 
 
 def clean_title(name, phrase) -> str:
-    phrase = (phrase or "").strip()
-    if name and phrase:
-        phrase = re.sub(re.escape(name), "", phrase).strip(" ,·")
-        phrase = re.sub(r"\s{2,}", " ", phrase).strip()
-        if phrase:
-            return f"{name} ‘{phrase}’"
-        return f"{name} 관련 현안"
-    if phrase:
-        return f"‘{phrase}’ 논란"
+    """인용구 중심 제목. 인물을 인용구 앞에 붙이지 않는다(발화자를 규칙으로 특정할 수 없어 오귀속이 생겼다).
+    인용구가 없을 때만 '{인물} 관련 현안'."""
+    phrase = re.sub(r"\s{2,}", " ", (phrase or "").strip())
+    if phrase and phrase != name:
+        return f"‘{phrase}’" if phrase.endswith("논란") else f"‘{phrase}’ 논란"
     if name:
         return f"{name} 관련 현안"
     return "정치 현안"
@@ -109,7 +107,9 @@ def should_merge(cluster: dict, issue: dict, now: datetime, stale_days: int | No
 
 def merge_plan(issues, now: datetime, stale_days: int | None = STALE_DAYS):
     """(흡수될 id, 남을 id) 쌍. 뉴스 이슈끼리만, 오래된 것이 남고, 한 문서는 한 번만."""
-    news = [i for i in (issues or []) if str(i.get("auto_key") or "").startswith("news:") and not i.get("merged_into")]
+    # 비활성(퇴역·병합된) 문서는 양쪽 후보 모두에서 뺀다 — 남는 쪽이 되면 병합 적용이 active=True로 되살린다
+    news = [i for i in (issues or []) if str(i.get("auto_key") or "").startswith("news:") and not i.get("merged_into")
+            and i.get("active") is not False]
     news.sort(key=lambda i: str(i.get("started_at") or i.get("updated_at") or ""))
     taken, pairs = set(), []
     for idx, keep in enumerate(news):

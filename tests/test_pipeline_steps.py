@@ -38,3 +38,12 @@ def test_daily_due_once_per_kst_day():
     assert daily_due(None, now)
     assert not daily_due("2026-11-11", now)
     assert daily_due("2026-11-10", now)
+
+
+def test_is_stale():
+    from datetime import datetime, timezone
+    from utils.pipeline_steps import is_stale
+    now = datetime(2026, 11, 16, 12, tzinfo=timezone.utc)
+    assert not is_stale("2026-11-16 06:00:00", now)          # 수집 시각 형식(UTC, 공백)
+    assert is_stale("2026-11-16T03:00:00+00:00", now)
+    assert is_stale(None, now) and is_stale("깨짐", now)

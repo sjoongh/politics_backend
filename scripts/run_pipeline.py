@@ -79,6 +79,8 @@ async def _run_step(step: str, ctx):
     if step == "collect_news":
         from services.news_service import news_service
         return await news_service.collect_news_from_rss()
+    if step == "check_freshness":
+        return _check_freshness()
     from services.source_ingest_service import source_ingest_service as ing
     if step == "ingest_gov":
         return await ing.ingest_gov_policy()
@@ -117,6 +119,19 @@ async def _run_step(step: str, ctx):
     if step == "enrich_member_votes":
         return await ms.enrich_member_votes()
     raise ValueError(f"unknown step {step}")
+
+
+def _check_freshness() -> dict:
+    """최신 기사 수집 시각이 8시간보다 오래면 실패 → 워크플로 실패 → GitHub 실패 알림 메일(무료 감시)."""
+    from datetime import timezone as _tz
+    from google.cloud import firestore as _fs
+    from firebase.firebase_config import db
+    from utils.pipeline_steps import is_stale, FRESHNESS_HOURS
+    docs = list(db.collection("articles").order_by("published_at", direction=_fs.Query.DESCENDING).limit(1).stream())
+    latest = (docs[0].to_dict() or {}).get("published_at") if docs else None
+    if is_stale(latest, datetime.now(_tz.utc)):
+        return {"success": False, "message": f"수집 정지 의심: 최신 기사 {latest} ({FRESHNESS_HOURS}시간 초과)"}
+    return {"success": True, "message": f"최신 기사 {latest}"}
 
 
 def main(argv=None) -> int:

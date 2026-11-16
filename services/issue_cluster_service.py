@@ -10,7 +10,8 @@ from firebase.firebase_config import db
 from utils.bill_cluster import cluster_by_bill
 from utils.newsworthiness import issue_score, vote_contention, PROMOTE
 from utils.fallback_summary import fallback_summary
-from utils.source_links import add_link, has_link
+from utils.source_links import add_link, has_link, law_mention
+from utils.issue_digest import representative_vote
 
 
 def _now():
@@ -45,11 +46,16 @@ class IssueClusterService:
             clusters = cluster_by_bill(src)
             touched = []
 
-            def _article_count(law_name):
+            def _article_count(law_name, full_title=""):
+                # 정식 법률명 그대로 또는 언론 별칭('조작기소 특검법')으로 언급한 기사 수
                 if not law_name or len(law_name) < 3:
                     return 0
-                return sum(1 for a in arts
-                           if law_name in (a.get("title", "") + " " + a.get("ai_summary", "")))
+                n = 0
+                for a in arts:
+                    text = a.get("title", "") + " " + a.get("ai_summary", "")
+                    if law_mention(law_name, text) or (full_title and law_mention(full_title, text) == "alias"):
+                        n += 1
+                return n
 
             created = updated = linked = skipped = 0
             for c in clusters:
@@ -72,19 +78,27 @@ class IssueClusterService:
 
                 if issue_id is None:
                     # 자동 이슈: 사건성 게이트(절차적 대안법안 도배 방지 — codex)
-                    ac = _article_count(law_name)
+                    ac = _article_count(law_name, c.get("bill_name") or "")
                     score = issue_score({"procedural": procedural}, items, article_count=ac)
                     contention = max((vote_contention(s.get("vote")) for s in items
                                       if s.get("type") == "assembly_vote"), default=0.0)
                     # 언론보도X·갈등약·소스 2종이하면 routine → 제외. 단 정부+법안+표결 등 3종↑ 문서화 법안은 통과(codex)
-                    routine = (ac == 0 and contention < 0.5 and len(c.get("types", [])) < 3)
+                    routine = (ac == 0 and contention < 0.5 and len(c.get("types", [])) < 3) \
+                        or (procedural and ac == 0)   # 회기결정·위원회 구성 같은 절차안은 보도가 없으면 이슈로 올리지 않는다
                     ref = db.collection("issues").document(f"issue_bill_{cbid}")
-                    exists = ref.get().exists
+                    _snap = ref.get()
+                    exists = _snap.exists
+                    cur_doc = (_snap.to_dict() or {}) if exists else {}
+                    if cur_doc.get("retired_reason"):
+                        skipped += 1   # 사람이 퇴역시킨 이슈는 파이프라인이 되살리지 않는다
+                        continue
                     if score < PROMOTE or routine:
                         # 사건성 미달: 생성 보류. 기존 자동이슈가 있으면 정리(소스 미연결로 되돌림).
+                        if exists and cur_doc.get("active") is not False:
+                            # 삭제하면 공유 링크가 깨진다 → 비활성(목록·오늘 판에서 빠짐). 기준 미달 자동 비활성 표시
+                            ref.update({"active": False, "inactive_reason": "gate", "updated_at": _now()})
                         if exists:
-                            ref.delete()
-                            for s_ in items:
+                            for s_ in [x for x in items if has_link(x, ref.id) or x.get("issue_id") == ref.id]:
                                 links = [l for l in (s_.get("links") or []) if l.get("issue_id") != ref.id]
                                 approved = [l["issue_id"] for l in links if l.get("status") in ("auto", "confirmed")]
                                 upd = {"links": links, "issue_ids": approved,
@@ -108,18 +122,20 @@ class IssueClusterService:
                         "auto_generated": True,
                         "auto_key": f"bill:{cbid}",
                         "active": True,
+                        "record_date": max((str(i.get("published_at") or "") for i in items), default="") or None,
                         "updated_at": _now(),
                     }
-                    doc["summary"] = fallback_summary(doc, {})
+                    doc["summary"] = fallback_summary({**doc, "vote": representative_vote(items)}, {})
                     if exists:
-                        cur_doc = ref.get().to_dict() or {}
                         patch = {k: doc[k] for k in
                                  ("title", "status", "keywords", "law_name", "procedural",
-                                  "newsworthiness", "updated_at")}
+                                  "newsworthiness", "record_date", "updated_at")}
                         if not cur_doc.get("ai_summarized"):
                             patch["summary"] = doc["summary"]
-                        if cur_doc.get("active") is None:
+                        if cur_doc.get("active") is not True:
+                            # 사람이 퇴역시킨 문서(retired_reason)는 위에서 건너뛰었으므로, 여기 오는 비활성은 기준 미달 자동 비활성뿐
                             patch["active"] = True
+                            patch["inactive_reason"] = None
                         ref.update(patch)
                         updated += 1
                     else:
