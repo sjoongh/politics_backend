@@ -76,10 +76,13 @@ def test_law_mention_rejects_mid_word_and_generic_cores():
     assert law_mention(sp, "순직 해병 특검법 재표결") == "alias"
 
 
-def test_generic_amendment_bill_is_pending_but_vote_is_auto():
+def test_generic_amendment_bill_and_vote_are_pending():
     from utils.source_links import news_issue_link_score
     bill = {"type": "assembly_bill", "title": "형사소송법 일부개정법률안", "law_name": "형사소송법", "procedural": False}
     assert news_issue_link_score(bill, "보완수사권 폐지 형사소송법 논란", []) == (5.0, "pending")
     vote = {"type": "assembly_vote", "title": "표결: 형사소송법 일부개정법률안(대안)(법제사법위원장)", "law_name": "형사소송법",
             "procedural": False}
-    assert news_issue_link_score(vote, "보완수사권 폐지 형사소송법 논란", []) == (12.0, "auto")
+    assert news_issue_link_score(vote, "보완수사권 폐지 형사소송법 논란", []) == (5.0, "pending")
+    unique = {"type": "assembly_vote", "title": "표결: 국가첨단전략산업 특별법안(대안)(산업통상자원위원장)",
+              "law_name": "국가첨단전략산업 특별법안", "procedural": False}
+    assert news_issue_link_score(unique, "국가첨단전략산업 특별법안 처리 논란", []) == (12.0, "auto")

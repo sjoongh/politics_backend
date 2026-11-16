@@ -130,10 +130,10 @@ def news_issue_link_score(source: dict, issue_blob: str, people) -> tuple:
     name = bill.get("bill_name") or ""
     if source.get("procedural"):
         return (0, None)
-    # 같은 법률을 고치는 의원 발의 개정안은 여러 건이다. 법률명만 같아서는 이 이슈가 다루는 법안이라고 볼 근거가
-    # 약하므로 자동 연결하지 않고 검수 대기로(2026-11-16 dry-run: 형사소송법 개정안 3건이 한 이슈에 붙음).
-    generic_amend = source.get("type") == "assembly_bill" and any(
-        t in (source.get("title") or "") for t in ("일부개정법률안", "전부개정법률안"))
+    # 같은 법률을 고치는 개정안은 발의·표결 모두 여러 건이다(형사소송법 개정 = 보완수사권일 수도 전자소송일 수도).
+    # 법률명만 같아서는 이 이슈가 다루는 안건이라는 근거가 약하므로 자동 연결하지 않고 검수 대기로.
+    # 자동 연결은 고유 이름 법안(특검법·제정법 등)의 정식명/별칭 일치만(2026-11-16 Codex 리뷰).
+    generic_amend = any(t in (source.get("title") or "") for t in ("일부개정법률안", "전부개정법률안"))
     if (len(law) >= 4 and law in blob) or (len(name) >= 4 and name in blob):
         return (5.0, "pending") if generic_amend else (12.0, "auto")
     if law_mention(law, blob) == "alias" or law_mention(name or _vote_title(source), blob) == "alias":
