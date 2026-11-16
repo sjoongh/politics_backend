@@ -190,10 +190,11 @@ class SourceLinkService:
                     if not status:
                         continue
                     cands.append({"source": src.get("title"), "type": src.get("type"), "issue": iss.get("title"),
-                                  "score": score, "status": status})
+                                  "issue_id": iss["id"], "source_id": src.get("id"), "score": score, "status": status})
                     if dry_run:
                         continue
-                    linked = add_link(src, iss["id"], status, score, "news_exact" if status == "auto" else "proposer", _now())
+                    reason = ("news_exact" if score >= 12 else "news_alias") if status == "auto" else "proposer"
+                    linked = add_link(src, iss["id"], status, score, reason, _now())
                     db.collection("source_items").document(src["id"]).update(
                         {**{k: linked[k] for k in ("links", "issue_ids", "issue_id", "link_status")}, "updated_at": _now()})
                     src.update(linked)
@@ -206,7 +207,7 @@ class SourceLinkService:
                         n_pending += 1
             return {"success": True, "message": "뉴스 이슈 소스 연결",
                     "data": {"auto": n_auto, "pending": n_pending, "scanned_sources": len(sources),
-                             "candidates": cands[:20] if dry_run else len(cands),
+                             "candidates": cands if dry_run else len(cands),
                              "issue_ids": list(dict.fromkeys(touched))}}
         except Exception as e:
             print(f"[link_news_issues] {e!r}")

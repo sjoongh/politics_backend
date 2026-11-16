@@ -8,18 +8,29 @@ def test_top_person():
     assert top_person([{"entities": {"people": ["권영진", "정점식"]}}, {"entities": {"people": ["권영진"]}}]) == "권영진"
 
 
+def test_top_person_reads_article_names_by_frequency():
+    # 기사 엔티티는 names 키. 가나다순이 아니라 빈도 1위(김민석 < 최민희 가나다순이지만 최민희가 많다)
+    arts = [{"entities": {"names": ["김민석", "최민희"]}}, {"entities": {"names": ["최민희"]}},
+            {"entities": {"names": ["최민희"]}}]
+    assert top_person(arts) == "최민희"
+
+
 def test_top_person_none():
     assert top_person([{"entities": {"people": []}}]) is None
 
 
-def test_clean_title_strips_name():
-    assert clean_title("김승원", "김승원 공세") == "김승원 ‘공세’"
+def test_clean_title_is_quote_centered():
+    # 인물을 인용구 앞에 붙이지 않는다(오귀속 방지)
+    assert clean_title("김민석", "하이에나 떼들") == "‘하이에나 떼들’ 논란"
+    assert clean_title("김승원", "김승원 공세") == "‘김승원 공세’ 논란"
 
 
 def test_clean_title_without_name_or_phrase():
     assert clean_title(None, "멱살 파문") == "‘멱살 파문’ 논란"
+    assert clean_title("김민석", "언행 논란") == "‘언행 논란’"
     assert clean_title("권영진", "") == "권영진 관련 현안"
     assert clean_title("권영진", "권영진") == "권영진 관련 현안"
+    assert clean_title(None, "") == "정치 현안"
 
 
 def test_merge_requires_same_person():

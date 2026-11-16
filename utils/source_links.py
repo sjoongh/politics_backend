@@ -4,11 +4,68 @@
 조회용 파생 배열, `issue_id`/`link_status`는 첫 승인 관계(없으면 첫 관계)의 미러(구 코드 호환).
 거절(rejected)된 관계는 자동 연결로 되살리지 않는다.
 """
+import re
+
 APPROVED = ("auto", "confirmed")
+
+# 언론 별칭 → 정식 법률명. '조작기소 특검법'처럼 '{핵심어} 특검법' 또는 '{핵심어}법'으로 부르는 경우,
+# 핵심어가 정식 법률명에 그대로 들어 있으면 같은 법안으로 본다(띄어쓰기·가운뎃점 무시).
+_SPECIAL_PROSECUTOR = re.compile(r"([가-힣]{3,12})\s?(?:특검법안|특검법|특검)")
+_LAW_SUFFIX = re.compile(r"([가-힣]{4,12})(?:법안|법)(?![가-힣])")
+# 여러 법률명에 흔히 들어가 핵심어 구실을 못 하는 말
+_GENERIC_CORE = {"위원회", "특별위원회", "특별", "일부개정", "전부개정", "개정", "기본", "지원", "진흥", "육성", "보호",
+                 "관리", "운영", "촉진", "특례", "조치", "처벌", "관한", "위한", "대한민국", "국가", "국민", "정부",
+                 "민생", "개혁", "방지", "강화", "완화"}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[\s·ㆍ,.()\[\]'\"‘’“”]", "", text or "")
+
+
+def _generic(core: str) -> bool:
+    # 흔한 말 자체이거나 그 조각('별위원회'), 또는 흔한 말 앞에 한 글자만 붙은 것
+    for g in _GENERIC_CORE:
+        if core in g or (core.endswith(g) and len(core) - len(g) < 2):
+            return True
+    return False
+
+
+def _core_in_law(run: str, law_n: str, min_len: int) -> bool:
+    """별칭 앞 한글 덩어리(run)의 뒷부분 중 min_len자 이상이 정식 법률명에 들어 있는지(앞말이 붙는 경우 대비)."""
+    run = _norm(run)
+    for i in range(0, len(run) - min_len + 1):
+        core = run[i:]
+        if not _generic(core) and core in law_n:
+            return True
+    return False
+
+
+def law_mention(law_name: str, text: str):
+    """text가 법안(law_name)을 가리키면 'exact'(정식명 그대로) 또는 'alias'(언론 별칭), 아니면 None."""
+    law = law_name or ""
+    text = text or ""
+    if len(law) >= 4 and law in text:
+        return "exact"
+    law_n = _norm(law)
+    if len(law_n) < 4:
+        return None
+    if "특별검사" in law_n:
+        for m in _SPECIAL_PROSECUTOR.finditer(text):
+            if _core_in_law(m.group(1), law_n, 3):
+                return "alias"
+    for m in _LAW_SUFFIX.finditer(text):
+        if _core_in_law(m.group(1), law_n, 4):
+            return "alias"
+    return None
 
 
 def _links(source: dict) -> list:
     return list(source.get("links") or [])
+
+
+def _vote_title(source: dict) -> str:
+    t = source.get("title") or ""
+    return t[len("표결: "):] if t.startswith("표결: ") else ""
 
 
 def has_link(source: dict, issue_id: str) -> bool:
@@ -49,13 +106,17 @@ def add_link(source: dict, issue_id: str, status: str, score: float, reason: str
 
 
 def news_issue_link_score(source: dict, issue_blob: str, people) -> tuple:
-    """뉴스 이슈용 점수. 정확 일치만 auto, 약한 신호는 pending."""
+    """뉴스 이슈용 점수. 정식 법률명 일치 12(auto), 언론 별칭 일치 10(auto), 제안자∩인물 5(pending)."""
     blob = issue_blob or ""
     law = source.get("law_name") or ""
     bill = source.get("bill") or {}
     name = bill.get("bill_name") or ""
+    if source.get("procedural"):
+        return (0, None)
     if (len(law) >= 4 and law in blob) or (len(name) >= 4 and name in blob):
         return (12.0, "auto")
+    if law_mention(law, blob) == "alias" or law_mention(name or _vote_title(source), blob) == "alias":
+        return (10.0, "auto")
     proposers = set(bill.get("proposers") or [])
     if proposers and proposers & set(people or []):
         return (5.0, "pending")

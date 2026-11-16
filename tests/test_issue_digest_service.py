@@ -63,3 +63,29 @@ def test_refresh_subset_and_active_default(monkeypatch):
     out = mod.issue_digest_service.refresh(issue_ids=["n1"])
     assert out["data"]["updated"] == 1 and db.data["issues"]["n1"]["active"] is True
     assert "digest" not in db.data["issues"]["b1"]
+
+
+def test_ctx_reranks_unchanged_issues_and_quiets_old_news(monkeypatch):
+    """변경 안 된 이슈도 순위 감쇠, 30일 무활동 뉴스 이슈는 소강(추가 읽기 없이 ctx 목록 사용)."""
+    from services.pipeline_context import PipelineContext
+    db = _db()
+    stale = {"id": "s", "auto_generated": True, "newsworthiness": 20, "auto_key": "news:s", "active": True,
+             "status": "진행중", "digest": {"counts": {}, "last_activity_at": "2026-10-01T00:00:00+00:00", "rank": 19.99}}
+    fresh_unchanged = {"id": "f", "auto_generated": True, "newsworthiness": 5, "auto_key": "bill:f", "active": True,
+                       "status": "가결", "digest": {"counts": {"vote": 1}, "last_activity_at": "2026-11-15T00:00:00+00:00",
+                                                  "last_official_at": "2026-11-15", "rank": 30.0}}
+    db.data["issues"].update({"s": dict(stale), "f": dict(fresh_unchanged)})
+    monkeypatch.setattr(mod, "db", db)
+    ctx = PipelineContext(lambda n: [], lambda: [dict(stale), dict(fresh_unchanged)], lambda d: [], lambda: set())
+    out = mod.issue_digest_service.refresh(ctx=ctx)
+    assert out["data"]["reranked"] == 2
+    s_mem = next(i for i in ctx.active_issues() if i["id"] == "s")
+    assert s_mem["status"] == "소강" and s_mem["digest"]["rank"] < 1   # 메모리에도 중첩 반영
+    f_mem = next(i for i in ctx.active_issues() if i["id"] == "f")
+    assert f_mem["status"] == "가결" and f_mem["digest"]["rank"] < 30.0  # 법안 이슈 상태는 건드리지 않음
+
+
+def test_apply_dotted():
+    d = {"digest": {"rank": 1, "counts": {}}}
+    mod._apply_dotted(d, {"digest.rank": 2, "status": "소강"})
+    assert d == {"digest": {"rank": 2, "counts": {}}, "status": "소강"}

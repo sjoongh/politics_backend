@@ -20,7 +20,9 @@ def test_loaders_run_once_and_share():
         calls["names"] += 1
         return {"김가"}
 
-    ctx = PipelineContext(load_articles=la, load_issues=li, load_sources=ls, load_member_names=ln)
+    # 고정 시각: 소스 날짜(11-10)가 '최근 3일' 안에 들도록(실제 날짜에 의존하면 날이 지나 깨진다)
+    ctx = PipelineContext(load_articles=la, load_issues=li, load_sources=ls, load_member_names=ln,
+                          now_iso="2026-11-11T00:00:00+00:00")
     assert len(ctx.articles(5)) == 5 and len(ctx.articles(3)) == 5     # 같은 캐시(더 큰 요청이 먼저면 재사용)
     assert ctx.active_issues() is ctx.active_issues()
     assert ctx.recent_sources(14) and ctx.recent_sources(3)             # 14일 캐시에서 3일 필터

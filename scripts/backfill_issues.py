@@ -6,6 +6,10 @@
   summary-flags  템플릿 요약("여러 매체가 보도한 현안입니다"/"…1차 소스를 묶은 이슈입니다")을 규칙 기반 대체 요약으로 교체, ai_summarized=False
   links          source_items의 issue_id/link_status → links[]·issue_ids 변환(변경 문서만)
   prune-crosslink 뉴스 이슈에서 인용구 규칙에 안 맞는 기사 연결 제거(인명 단독 오염 정정)
+  retire         지정한 이슈를 비활성(active=False)으로(--ids a,b). 문서는 지우지 않는다(공유 링크 유지)
+  procedural     표결·법안 소스의 procedural 플래그를 현재 규칙으로 재계산
+  retitle        뉴스 이슈: 인물(빈도 기준)·인용구 중심 제목·요약(인용구 담은 기사 우선, 영어 AI 요약 교체)·소강 상태
+                 법안 이슈: 요약을 표결 결과·표결일로, 보도 없는 절차안 이슈 비활성
 
 실행: .venv/bin/python scripts/backfill_issues.py article-meta [--apply]
 """
@@ -186,13 +190,168 @@ def cmd_prune_crosslink(apply: bool) -> int:
     return 0
 
 
+def cmd_retire(apply: bool, ids: list, reason: str) -> int:
+    from firebase.firebase_config import db
+    snaps = [db.collection("issues").document(i).get() for i in ids]
+    docs = [{**s_.to_dict(), "id": s_.id} for s_ in snaps if s_.exists]
+    for d in docs:
+        print(f"  {d['id']}: {d.get('title')} active={d.get('active')} rank={(d.get('digest') or {}).get('rank')}")
+    missing = sorted(set(ids) - {d["id"] for d in docs})
+    print(f"targets={len(docs)} missing={missing}")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    path = dump_backup("retire", [{"id": d["id"], "active": d.get("active"), "retired_reason": d.get("retired_reason")} for d in docs])
+    now = datetime.now(timezone.utc).isoformat()
+    for d in docs:
+        db.collection("issues").document(d["id"]).update({"active": False, "retired_reason": reason, "updated_at": now})
+    print(f"applied={len(docs)} backup={path}")
+    return 0
+
+
+def cmd_procedural(apply: bool) -> int:
+    from firebase.firebase_config import db
+    from google.cloud import firestore as _fs
+    from utils.law_name import is_procedural
+    docs = [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").where("type", "==", "assembly_vote").stream()]
+    docs += [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").where("type", "==", "assembly_bill")
+             .order_by("published_at", direction=_fs.Query.DESCENDING).order_by("__name__")   # 소스 목록 API와 같은 인덱스
+             .limit(600).stream()]
+    patches = []
+    for d in docs:
+        name = (d.get("title") or "").replace("표결: ", "", 1)
+        new = is_procedural(name)
+        if bool(d.get("procedural")) != new:
+            patches.append((d["id"], new, name))
+    flips = sum(1 for _, n, _ in patches if n)
+    print(f"sources={len(docs)} to_update={len(patches)} (→절차안 {flips}, →실질 {len(patches) - flips}) reads={len(docs)}")
+    for sid, n, name in patches[:12]:
+        print(f"  {'절차' if n else '실질'} | {name[:70]}")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    ids = {p_[0] for p_ in patches}
+    path = dump_backup("procedural", [{"id": d["id"], "procedural": d.get("procedural")} for d in docs if d["id"] in ids])
+    for sid, n, _ in patches:
+        db.collection("source_items").document(sid).update({"procedural": n})
+    print(f"applied={len(patches)} backup={path}")
+    return 0
+
+
+def _retitle_news(iss: dict, arts: list, known: set, now) -> dict:
+    """뉴스 이슈 1건의 새 필드(바뀌는 것만). arts: 이슈의 최근 기사(최대 20)."""
+    from collections import Counter
+    from utils.news_entities import extract_entities
+    from utils.issue_merge import clean_title
+    from utils.fallback_summary import fallback_summary
+    from utils.gemini_rest import is_korean
+    from utils.issue_digest import news_status
+    cur_people = (iss.get("entities") or {}).get("people") or []
+    kws = iss.get("keywords") or []
+    phrase = kws[0] if kws and kws[0] not in cur_people else ""
+    cnt = Counter()
+    for a in arts:
+        for n in extract_entities(a.get("title"), a.get("ai_summary"), known).get("names") or []:
+            cnt[n] += 1
+    people = [n for n, _ in sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))] or list(cur_people)
+    person = people[0] if people else None
+    new = {"title": clean_title(person, phrase),
+           "keywords": [k for k in ([phrase] + people) if k][:6],
+           "entities": {**(iss.get("entities") or {}), "people": people}}
+    probe = {**iss, **new}
+    if not iss.get("ai_summarized") or not is_korean(iss.get("summary") or ""):
+        new["summary"] = fallback_summary(probe, {a["id"]: a for a in arts})
+        new["ai_summarized"] = False
+    st = news_status(iss, (iss.get("digest") or {}).get("last_activity_at"), now)
+    if st:
+        new["status"] = st
+    return {k: v for k, v in new.items() if iss.get(k) != v}
+
+
+def _retitle_bill(iss: dict) -> dict:
+    from utils.fallback_summary import fallback_summary
+    from utils.law_name import is_procedural
+    dg = iss.get("digest") or {}
+    new = {}
+    rec = (dg.get("vote") or {}).get("date") or dg.get("last_official_at")
+    if rec and not iss.get("record_date"):
+        new["record_date"] = str(rec)[:10]
+    if not iss.get("ai_summarized"):
+        new["summary"] = fallback_summary({**iss, **new}, {})
+    if is_procedural(iss.get("title") or "") and not (dg.get("counts") or {}).get("media"):
+        new["active"] = False
+        new["retired_reason"] = "보도 없는 절차안"
+    return {k: v for k, v in new.items() if iss.get(k) != v}
+
+
+def cmd_retitle(apply: bool) -> int:
+    from firebase.firebase_config import db
+    from services.pipeline_context import firestore_context
+    issues = [{**d.to_dict(), "id": d.id} for d in db.collection("issues").stream()
+              if d.to_dict().get("active") is not False]
+    news = [i for i in issues if str(i.get("auto_key") or "").startswith("news:")]
+    bills = [i for i in issues if str(i.get("auto_key") or "").startswith("bill:")]
+    known = firestore_context(db).member_names()
+    def recent_ids(i):
+        meta = i.get("article_meta") or {}
+        ids = sorted(meta, key=lambda k: (meta[k] or {}).get("at") or "", reverse=True)
+        ids = ids or list(i.get("article_ids") or [])
+        return list(dict.fromkeys(ids[:25] + ids[-5:]))   # 최근 25 + 처음 묶인 5(인용구 원문이 있는 기사)
+    need = sorted({a for i in news for a in recent_ids(i)})
+    arts = {}
+    for chunk in _chunks(need, 300):
+        for snap in db.get_all([db.collection("articles").document(a) for a in chunk]):
+            if snap.exists:
+                arts[snap.id] = {**snap.to_dict(), "id": snap.id}
+    now = datetime.now(timezone.utc)
+    patches = []
+    for i in news:
+        p_ = _retitle_news(i, [arts[a] for a in recent_ids(i) if a in arts], known, now)
+        if p_:
+            patches.append((i, p_))
+    for i in bills:
+        p_ = _retitle_bill(i)
+        if p_:
+            patches.append((i, p_))
+    print(f"issues={len(issues)} news={len(news)} bills={len(bills)} to_update={len(patches)} reads≈{len(issues) + len(need) + 1}")
+    for i, p_ in patches:
+        line = f"  [{i['id'][:22]}] {i.get('title')!s:.34}"
+        if "title" in p_:
+            line += f" → {p_['title']}"
+        if "status" in p_:
+            line += f" | 상태 {i.get('status')}→{p_['status']}"
+        if p_.get("active") is False:
+            line += " | 비활성"
+        print(line)
+        if "summary" in p_:
+            print(f"      요약: {str(i.get('summary'))[:40]!r} → {p_['summary'][:50]!r}")
+    if not apply:
+        print("dry-run (no writes). --apply to write.")
+        return 0
+    keys = sorted({k for _, p_ in patches for k in p_})
+    path = dump_backup("retitle", [{"id": i["id"], **{k: i.get(k) for k in keys}} for i, _ in patches])
+    for i, p_ in patches:
+        db.collection("issues").document(i["id"]).update(p_)
+    print(f"applied={len(patches)} backup={path}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("article-meta", "digest", "summary-flags", "links", "prune-crosslink"):
+    for name in ("article-meta", "digest", "summary-flags", "links", "prune-crosslink", "retire", "procedural", "retitle"):
         p = sub.add_parser(name)
         p.add_argument("--apply", action="store_true")
+        if name == "retire":
+            p.add_argument("--ids", required=True)
+            p.add_argument("--reason", default="샘플 데이터 정리")
     args = ap.parse_args(argv)
+    if args.cmd == "retire":
+        return cmd_retire(args.apply, [x.strip() for x in args.ids.split(",") if x.strip()], args.reason)
+    if args.cmd == "procedural":
+        return cmd_procedural(args.apply)
+    if args.cmd == "retitle":
+        return cmd_retitle(args.apply)
     if args.cmd == "article-meta":
         return cmd_article_meta(args.apply)
     if args.cmd == "digest":
