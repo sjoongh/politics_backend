@@ -34,7 +34,7 @@ jobs:
           AI_THROTTLE_SEC: "2"
           GEMINI_DAILY_BUDGET: "18"
           STANCE_PRESS: "0"
-          LINK_NEWS_ISSUES: "0"
+          LINK_NEWS_ISSUES: "1"   # 2026-11-16 활성: 표결·고유 법안만 자동, 의원 발의 개정안은 검수 대기
         run: python scripts/run_pipeline.py
       # GitHub는 리포 60일 무활동 시 schedule 워크플로를 자동 비활성화(disabled_inactivity)한다.
       # 매 실행 끝에 enable API를 호출해 타이머를 리셋한다(실패해도 수집 결과에는 영향 없음).

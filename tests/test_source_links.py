@@ -74,3 +74,12 @@ def test_law_mention_rejects_mid_word_and_generic_cores():
     assert law_mention(sp, "김건희 의혹 진상규명법 처리") is None
     assert law_mention(sp, "김건희 특검법 처리") is None
     assert law_mention(sp, "순직 해병 특검법 재표결") == "alias"
+
+
+def test_generic_amendment_bill_is_pending_but_vote_is_auto():
+    from utils.source_links import news_issue_link_score
+    bill = {"type": "assembly_bill", "title": "형사소송법 일부개정법률안", "law_name": "형사소송법", "procedural": False}
+    assert news_issue_link_score(bill, "보완수사권 폐지 형사소송법 논란", []) == (5.0, "pending")
+    vote = {"type": "assembly_vote", "title": "표결: 형사소송법 일부개정법률안(대안)(법제사법위원장)", "law_name": "형사소송법",
+            "procedural": False}
+    assert news_issue_link_score(vote, "보완수사권 폐지 형사소송법 논란", []) == (12.0, "auto")
