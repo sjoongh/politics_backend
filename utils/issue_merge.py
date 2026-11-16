@@ -107,7 +107,9 @@ def should_merge(cluster: dict, issue: dict, now: datetime, stale_days: int | No
 
 def merge_plan(issues, now: datetime, stale_days: int | None = STALE_DAYS):
     """(흡수될 id, 남을 id) 쌍. 뉴스 이슈끼리만, 오래된 것이 남고, 한 문서는 한 번만."""
-    news = [i for i in (issues or []) if str(i.get("auto_key") or "").startswith("news:") and not i.get("merged_into")]
+    # 비활성(퇴역·병합된) 문서는 양쪽 후보 모두에서 뺀다 — 남는 쪽이 되면 병합 적용이 active=True로 되살린다
+    news = [i for i in (issues or []) if str(i.get("auto_key") or "").startswith("news:") and not i.get("merged_into")
+            and i.get("active") is not False]
     news.sort(key=lambda i: str(i.get("started_at") or i.get("updated_at") or ""))
     taken, pairs = set(), []
     for idx, keep in enumerate(news):

@@ -33,6 +33,15 @@ def test_clean_title_without_name_or_phrase():
     assert clean_title(None, "") == "정치 현안"
 
 
+def test_merge_plan_skips_inactive_on_both_sides():
+    # 퇴역(active=False) 문서가 '남는 쪽'이 되면 병합 적용이 되살린다 → 후보에서 제외
+    base = {"auto_key": "news:x", "keywords": ["하이에나 떼들", "최민희"], "entities": {"people": ["최민희"]},
+            "updated_at": "2026-11-09T00:00:00+00:00"}
+    retired = {**base, "id": "retired", "active": False, "started_at": "2026-11-01"}
+    live = {**base, "id": "live", "active": True, "keywords": ["하이에나", "최민희"], "started_at": "2026-11-05"}
+    assert merge_plan([retired, live], NOW) == []
+
+
 def test_merge_requires_same_person():
     c = {"article_ids": {"a", "b", "c"}, "person": "권영진", "phrases": ["멱살 파문"]}
     iss = {"entities": {"people": ["김승원"]}, "article_ids": ["a", "b", "c"], "keywords": ["멱살"],

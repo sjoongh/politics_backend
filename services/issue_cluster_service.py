@@ -86,13 +86,19 @@ class IssueClusterService:
                     routine = (ac == 0 and contention < 0.5 and len(c.get("types", [])) < 3) \
                         or (procedural and ac == 0)   # 회기결정·위원회 구성 같은 절차안은 보도가 없으면 이슈로 올리지 않는다
                     ref = db.collection("issues").document(f"issue_bill_{cbid}")
-                    exists = ref.get().exists
+                    _snap = ref.get()
+                    exists = _snap.exists
+                    cur_doc = (_snap.to_dict() or {}) if exists else {}
+                    if cur_doc.get("retired_reason"):
+                        skipped += 1   # 사람이 퇴역시킨 이슈는 파이프라인이 되살리지 않는다
+                        continue
                     if score < PROMOTE or routine:
                         # 사건성 미달: 생성 보류. 기존 자동이슈가 있으면 정리(소스 미연결로 되돌림).
+                        if exists and cur_doc.get("active") is not False:
+                            # 삭제하면 공유 링크가 깨진다 → 비활성(목록·오늘 판에서 빠짐). 기준 미달 자동 비활성 표시
+                            ref.update({"active": False, "inactive_reason": "gate", "updated_at": _now()})
                         if exists:
-                            # 삭제하면 공유 링크가 깨진다 → 비활성(목록·오늘 판에서 빠짐)
-                            ref.update({"active": False, "updated_at": _now()})
-                            for s_ in items:
+                            for s_ in [x for x in items if has_link(x, ref.id) or x.get("issue_id") == ref.id]:
                                 links = [l for l in (s_.get("links") or []) if l.get("issue_id") != ref.id]
                                 approved = [l["issue_id"] for l in links if l.get("status") in ("auto", "confirmed")]
                                 upd = {"links": links, "issue_ids": approved,
@@ -121,14 +127,14 @@ class IssueClusterService:
                     }
                     doc["summary"] = fallback_summary({**doc, "vote": representative_vote(items)}, {})
                     if exists:
-                        cur_doc = ref.get().to_dict() or {}
                         patch = {k: doc[k] for k in
                                  ("title", "status", "keywords", "law_name", "procedural",
                                   "newsworthiness", "record_date", "updated_at")}
                         if not cur_doc.get("ai_summarized"):
                             patch["summary"] = doc["summary"]
-                        if cur_doc.get("active") is not True:
-                            patch["active"] = True   # 비활성 처리됐다가 다시 기준을 넘은 경우 복귀
+                        if cur_doc.get("active") is None or cur_doc.get("inactive_reason") == "gate":
+                            patch["active"] = True   # 기준 미달로 자동 비활성됐다가 다시 기준을 넘은 경우만 복귀
+                            patch["inactive_reason"] = None
                         ref.update(patch)
                         updated += 1
                     else:

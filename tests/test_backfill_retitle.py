@@ -37,4 +37,8 @@ def test_retitle_bill_summary_and_procedural_retire():
     assert p["summary"] == "가결 · 8.20 표결 · 찬성 156 · 반대 9 · 기권 12" and "active" not in p
     proc = {"id": "p", "auto_key": "bill:2", "title": "제437회국회(임시회) 회기결정의 건(국회운영위원장)", "status": "가결",
             "digest": {"counts": {"media": 0, "vote": 1}, "vote": {"date": "2026-07-30", "yes": 113, "no": 83, "abstain": 0, "result": "가결"}}}
-    assert _retitle_bill(proc)["active"] is False
+    p = _retitle_bill(proc)
+    assert p["active"] is False and p["inactive_reason"] == "gate" and "retired_reason" not in p
+    # digest가 낡아 media=0이어도 실제 기사 메타가 있으면 비활성하지 않는다
+    proc["article_meta"] = {"a": {"at": "2026-07-30"}}
+    assert "active" not in _retitle_bill(proc)

@@ -89,3 +89,74 @@ def test_apply_dotted():
     d = {"digest": {"rank": 1, "counts": {}}}
     mod._apply_dotted(d, {"digest.rank": 2, "status": "소강"})
     assert d == {"digest": {"rank": 2, "counts": {}}, "status": "소강"}
+
+
+class _NestedDB:
+    """점 표기 update와 중첩 필드 범위 조회(>=, <)를 Firestore처럼 처리하는 최소 가짜."""
+    def __init__(self, docs):
+        self.docs = docs
+        self.writes = []
+
+    @staticmethod
+    def _get(d, path):
+        for k in path.split("."):
+            d = (d or {}).get(k) if isinstance(d, dict) else None
+        return d
+
+    def collection(self, name):
+        db = self
+
+        class Ref:
+            def __init__(self, _id):
+                self.id = _id
+
+            def update(self, patch):
+                db.writes.append((self.id, patch))
+                doc = db.docs[self.id]
+                for k, v in patch.items():
+                    cur = doc
+                    *heads, last = k.split(".")
+                    for h in heads:
+                        cur = cur.setdefault(h, {})
+                    cur[last] = v
+
+        class Q:
+            def __init__(self, filters=()):
+                self.filters = filters
+
+            def where(self, f, op, v):
+                return Q(self.filters + ((f, op, v),))
+
+            def document(self, _id):
+                return Ref(_id)
+
+            def stream(self):
+                for _id, d in db.docs.items():
+                    ok = True
+                    for f, op, v in self.filters:
+                        cur = _NestedDB._get(d, f)
+                        if cur is None or (op == ">=" and not cur >= v) or (op == "<" and not cur < v):
+                            ok = False
+                    if ok:
+                        yield Snap(_id, d)
+        return Q()
+
+
+def test_sweep_quiet_band_and_dotted_persist(monkeypatch):
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 16, tzinfo=timezone.utc)
+    docs = {
+        "crossed": {"auto_key": "news:a", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
+                    "digest": {"counts": {}, "last_activity_at": "2026-10-16T12:00:00+00:00", "rank": 5.0}},   # 30.5일
+        "old": {"auto_key": "news:b", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
+                "digest": {"counts": {}, "last_activity_at": "2026-09-01T00:00:00+00:00", "rank": 5.0}},       # 구간 밖
+        "recent": {"auto_key": "news:c", "auto_generated": True, "newsworthiness": 20, "status": "진행중", "active": True,
+                   "digest": {"counts": {}, "last_activity_at": "2026-11-15T00:00:00+00:00", "rank": 5.0}},     # ctx 창 안
+    }
+    db = _NestedDB(docs)
+    monkeypatch.setattr(mod, "db", db)
+    n = mod.issue_digest_service._sweep_quiet(now)
+    assert n == 1 and [w[0] for w in db.writes] == ["crossed"]
+    assert docs["crossed"]["status"] == "소강"
+    assert docs["crossed"]["digest"]["rank"] < 5.0 and "digest.rank" not in docs["crossed"]   # 중첩 필드로 저장
+    assert docs["old"]["status"] == "진행중" and docs["recent"]["status"] == "진행중"

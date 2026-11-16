@@ -190,6 +190,9 @@ def cmd_prune_crosslink(apply: bool) -> int:
     return 0
 
 
+READ_GUARD = 15000   # backfill 한 번이 하루 무료 읽기(5만)의 30%를 넘지 않게
+
+
 def cmd_retire(apply: bool, ids: list, reason: str) -> int:
     from firebase.firebase_config import db
     snaps = [db.collection("issues").document(i).get() for i in ids]
@@ -211,12 +214,17 @@ def cmd_retire(apply: bool, ids: list, reason: str) -> int:
 
 def cmd_procedural(apply: bool) -> int:
     from firebase.firebase_config import db
-    from google.cloud import firestore as _fs
     from utils.law_name import is_procedural
-    docs = [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").where("type", "==", "assembly_vote").stream()]
-    docs += [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").where("type", "==", "assembly_bill")
-             .order_by("published_at", direction=_fs.Query.DESCENDING).order_by("__name__")   # 소스 목록 API와 같은 인덱스
-             .limit(600).stream()]
+    # 표결·법안 전수(일부만 고치면 생성 단계의 any(procedural)가 옛 판정을 계속 본다). 개수 집계 1회로 예산 확인.
+    n_est = 0
+    for t in ("assembly_vote", "assembly_bill"):
+        n_est += db.collection("source_items").where("type", "==", t).count().get()[0][0].value
+    if n_est > READ_GUARD:
+        print(f"대상 {n_est}건 > 읽기 가드 {READ_GUARD} — 중단(하루 무료 읽기 5만 보호)")
+        return 1
+    docs = []
+    for t in ("assembly_vote", "assembly_bill"):
+        docs += [{**d.to_dict(), "id": d.id} for d in db.collection("source_items").where("type", "==", t).stream()]
     patches = []
     for d in docs:
         name = (d.get("title") or "").replace("표결: ", "", 1)
@@ -278,9 +286,10 @@ def _retitle_bill(iss: dict) -> dict:
         new["record_date"] = str(rec)[:10]
     if not iss.get("ai_summarized"):
         new["summary"] = fallback_summary({**iss, **new}, {})
-    if is_procedural(iss.get("title") or "") and not (dg.get("counts") or {}).get("media"):
+    media = len(iss.get("article_meta") or {}) or len(iss.get("article_ids") or [])
+    if is_procedural(iss.get("title") or "") and media == 0:
         new["active"] = False
-        new["retired_reason"] = "보도 없는 절차안"
+        new["inactive_reason"] = "gate"   # 규칙 기반 비활성: 보도가 생기면 파이프라인이 복귀시킨다
     return {k: v for k, v in new.items() if iss.get(k) != v}
 
 
@@ -298,6 +307,9 @@ def cmd_retitle(apply: bool) -> int:
         ids = ids or list(i.get("article_ids") or [])
         return list(dict.fromkeys(ids[:25] + ids[-5:]))   # 최근 25 + 처음 묶인 5(인용구 원문이 있는 기사)
     need = sorted({a for i in news for a in recent_ids(i)})
+    if len(issues) + len(need) > READ_GUARD:
+        print(f"예상 읽기 {len(issues) + len(need)} > 읽기 가드 {READ_GUARD} — 중단")
+        return 1
     arts = {}
     for chunk in _chunks(need, 300):
         for snap in db.get_all([db.collection("articles").document(a) for a in chunk]):
