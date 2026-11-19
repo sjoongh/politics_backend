@@ -62,6 +62,9 @@ async def _generate(prompt: str, *, json_mode: bool, timeout: float, kind: str =
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(url, json=payload, headers=headers)
         if r.status_code != 200:
+            # 원인 구분용(분당 제한인지 일일 한도인지 본문의 quotaId로 갈린다). 키는 헤더로만 보내 본문에 없다.
+            excerpt = " ".join(str(getattr(r, "text", "") or "").split())[:1200]
+            print(f"[gemini] http_{r.status_code} kind={kind} model={_model()} body={excerpt}")
             if r.status_code == 429:
                 budget().mark_exhausted()   # 쿼터 소진: 그날 남은 호출 즉시 중단
             return None, f"http_{r.status_code}"

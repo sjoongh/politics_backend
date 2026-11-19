@@ -498,7 +498,7 @@ def test_build_edition_sections():
 - [x] **Step 4: backfill** — `backfill_issues.py article-meta --apply` → `links --apply` → `digest --apply` → `summary-flags --apply`(템플릿 요약 이슈 `ai_summarized=False`). 각 dry-run 수치와 apply 수치 대조.
 - [x] **Step 5: 정제** (병합 0쌍 미적용) — `backfill_issues.py prune-crosslink`(dry-run → 사용자 확인 → `--apply`) → `merge_duplicate_issues.py --report` → **사용자에게 요약(쌍 수·예시 3개) 제시 → 확인 후** `--apply`. 두 스크립트는 끝에 대상 이슈 digest를 재계산한다. 자동 연결 표본 20건 보고 → 정밀도 ≥ 0.9이면 워크플로 env `LINK_NEWS_ISSUES=1`로 활성화(기본 비활성).
 - [x] **Step 6: 2차 확인** (24h 읽기 확인 남음) — `GET /api/issues?v=2&sort=rank&limit=5` 200·`next_cursor`, `GET /api/today` 200, `GET /api/sources?type=assembly_vote` 200. 상세 웜·캐시 미스 5회 p50 ≤ 2초 기록. 상위 20 이슈 중 공식 기록 붙은 이슈 수 before/after 기록. **24시간 뒤 Firebase 콘솔 사용량에서 일일 읽기 수가 5만 미만인지 확인**해 기록.
-- [ ] **Step 7: 실행 기록을 이 문서 하단에 추가하고 커밋** `docs(plan): backend rollout record`
+- [x] **Step 7: 실행 기록을 이 문서 하단에 추가하고 커밋** `docs(plan): backend rollout record`
 
 ---
 
@@ -519,3 +519,22 @@ def test_build_edition_sections():
 - 오늘 판 생성(top 1), 스냅샷 수동 갱신 2회(side-bf 세션 snapshots.yml).
 - 라이브 확인: `/api/issues?v=2` 200·digest 포함, `/api/today` 200, `/api/sources` 200, 이슈 상세 캐시 미스 5회 0.15~0.30s(이전 33s). 라이브 캡처에서 오늘 판·소스 줄·규칙 기반 요약 표시 확인.
 - 미완: LINK_NEWS_ISSUES 표본 검수(후보 3건뿐 → 비활성 유지), 24시간 뒤 Firestore 일일 읽기 확인.
+
+2026-11-12 (KST) — 출처: PR #11·#13 본문, 실행 로그
+- 병합: `merge_duplicate_issues.py --ignore-stale`(수동 일회성 전용)로 2쌍 적용. 기본 dry-run은 0쌍.
+- 정부 소스: korea.kr 정책브리핑 RSS 중단(2026-07-01) → 보도자료 목록 HTML 파싱으로 교체(`utils/korea_briefing.py`). `news_service`의 죽은 korea.kr RSS 3개 제거.
+- 미처리 500에도 CORS 헤더 유지(`UnhandledErrorMiddleware`). Vercel prod 배포.
+- 수집 실패 4회(11-11 09시~11-12 04시 UTC): 옛 코드의 정부 RSS 404, 러너의 korea.kr 접속 timeout 1회. 08:12 UTC 실행부터 성공.
+
+2026-11-16~17 (KST) — 출처: PR #14·#15 본문
+- 데이터 신뢰성 보정: 인용구 중심 제목, 요약 선택 규칙, 매 실행 순위 감쇠 + 공식 기록 가산(168h), 뉴스 이슈 30일 무활동 `소강`, 절차안 판정 수정, 법안 별칭, 수집 신선도 점검(8시간), 6월 샘플 이슈 2개 비활성.
+- 인덱스 추가(issues: status + digest.last_activity_at). backfill retire/procedural/retitle/digest 적용, 병합 3쌍 적용('한동훈 복당' 쌍은 `--exclude`로 보류).
+- `LINK_NEWS_ISSUES=1` 활성: 고유 이름 법안의 정식명·별칭 일치만 자동, 개정안은 발의·표결 모두 검수 대기. 실행당 연결 쓰기 상한 50.
+
+2026-11-19 (KST) 운영 점검 — 출처: 수집 실행 로그 11회(11-15 21:41~11-19 03:14 UTC), Firestore `_meta/ai_budget_*` 9일치
+- 읽기: 11-16 변경 전 1,860~1,877 → 후 1,882~1,911/실행. 의원 보강(600)이 겹친 실행은 2,186~2,572로 `reads > 2000` 경고가 하루 1~2회 난다. 수집은 하루 3~4회, 파이프라인 합계 6.5천 안팎(API·스냅샷 읽기는 미계측). Step 6의 "Firebase 콘솔 일일 읽기 확인"은 콘솔 값으로는 미확인.
+- 11-17 22:12 UTC 실패: korea.kr 요청 불가, 같은 실행에서 국회 법안·표결도 0건. 이후 4회 성공.
+- 자동 연결: 활성 후 9회 실행 중 자동 1건(11-17 13:09 UTC), 나머지 후보 0. 소강 처리 0건.
+- **AI 사건요약 조기 소진**: `_meta/ai_budget_{KST날짜}`가 11-11~11-19 중 6일(11-11·13·15·16·17·19)에 enrich 7~8건 직후 `exhausted: True`, summary 0건. 요약이 돈 날은 11-12(9)·11-14(10)·11-18(10). `exhausted`는 Gemini 429에서만 세워진다. 분당 제한인지 일일 한도인지는 미확인 → 비정상 응답 본문을 `[gemini] http_...` 한 줄로 남기는 로그 추가(이 PR). 수정안은 로그 확인 후 결정.
+- **죽은 뉴스 RSS 3개 교체**(이 PR): 한국경제·세계일보는 최소 2026-09-23 로그부터 매 실행 파싱 실패, JTBC는 2024-10-29 이후 갱신 없음. 새 주소는 수집기와 같은 방식(requests + feedparser)으로 확인: 한국경제 50건, 세계일보 20건, JTBC 37건, 모두 당일 기사.
+

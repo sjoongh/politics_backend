@@ -58,8 +58,8 @@ class NewsService:
             "정치": [
                 "https://www.yna.co.kr/rss/politics.xml", # 연합뉴스 정치
                 "https://www.yonhapnewstv.co.kr/category/news/politics/feed/", # 연합뉴스TV 정치
-                "https://rss.hankyung.com/politics.xml", # 한국경제 정치
-                "http://www.segye.com/Articles/RSSFeed/Politics.xml", # 세계일보 정치
+                "https://www.hankyung.com/feed/politics", # 한국경제 정치
+                "https://www.segye.com/Articles/RSSList/segye_politic.xml", # 세계일보 정치
                 "http://www.hani.co.kr/rss/politics/", # 한겨레 정치
                 "https://rss.donga.com/politics.xml",  # 동아일보 정치
                 "https://feeds.bbci.co.uk/korean/rss.xml",  # BBC 코리아 (외신)
@@ -70,7 +70,7 @@ class NewsService:
                 "https://www.pressian.com/api/v3/site/rss/section/65",  # 프레시안(진보)
                 "https://www.newsis.com/RSS/politics.xml",  # 뉴시스(통신)
                 "https://www.seoul.co.kr/xml/rss/rss_politics.xml",  # 서울신문
-                "https://fs.jtbc.co.kr/RSS/politics.xml",  # JTBC
+                "https://news-ex.jtbc.co.kr/v1/get/rss/section/politics",  # JTBC 정치
             ],
             # korea.kr 정책브리핑 RSS(대통령·정책·정부)는 2026-07-01 중단. 정부 보도자료는 source_ingest_service가 source_items(gov_policy)로 수집한다.
         }
@@ -86,6 +86,7 @@ class NewsService:
             "sedaily.com": "서울경제",
             "bbc.co.uk": "BBC 코리아", "bbci.co.uk": "BBC 코리아",
             "khan.co.kr": "경향신문", "sbs.co.kr": "SBS", "ohmynews.com": "오마이뉴스",
+            "jtbc.co.kr": "JTBC",
             "president": "대통령실", "policy": "정책 뉴스", "ebriefing": "부처별 브리핑"
         }
 
